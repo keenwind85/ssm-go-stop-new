@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/icon-192.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#1a1a2e" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="고스톱" />
+    <meta name="description" content="실시간 멀티플레이어 고스톱 게임" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>고스톱 - Go-Stop</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background-color: #1a1a2e;
+        touch-action: none;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+
+      #game-container {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+
+      #game-container canvas {
+        display: block;
+        max-width: 100%;
+        max-height: 100%;
+      }
+
+      #loading {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        background-color: #1a1a2e;
+        color: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        z-index: 1000;
+      }
+
+      #loading.hidden {
+        display: none;
+      }
+
+      .loading-spinner {
+        width: 50px;
+        height: 50px;
+        border: 3px solid rgba(255, 255, 255, 0.2);
+        border-top-color: #e94560;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+
+      .loading-text {
+        margin-top: 20px;
+        font-size: 18px;
+        color: #e94560;
+      }
+
+      .loading-progress {
+        margin-top: 10px;
+        font-size: 14px;
+        opacity: 0.7;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+
+      /* Landscape mode enforcement */
+      #rotate-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: #1a1a2e;
+        z-index: 9999;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        color: #ffffff;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        text-align: center;
+        padding: 20px;
+      }
+
+      .rotate-icon {
+        font-size: 80px;
+        margin-bottom: 20px;
+        animation: rotate-hint 2s ease-in-out infinite;
+      }
+
+      .rotate-text {
+        font-size: 24px;
+        font-weight: bold;
+        color: #e94560;
+        margin-bottom: 10px;
+      }
+
+      .rotate-subtext {
+        font-size: 16px;
+        opacity: 0.7;
+      }
+
+      @keyframes rotate-hint {
+        0%, 100% { transform: rotate(0deg); }
+        25% { transform: rotate(-15deg); }
+        75% { transform: rotate(15deg); }
+      }
+
+      /* Auth overlay */
+      #auth-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(10, 10, 20, 0.92);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 10000;
+        transition: opacity 0.3s ease;
+      }
+
+      #auth-overlay.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .auth-card {
+        background: rgba(22, 33, 62, 0.95);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        padding: 32px 40px;
+        width: min(90%, 420px);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+        text-align: center;
+      }
+
+      .auth-card h1 {
+        font-size: 28px;
+        margin-bottom: 12px;
+        color: #ffffff;
+      }
+
+      .auth-card p {
+        font-size: 15px;
+        color: rgba(255, 255, 255, 0.75);
+        margin-bottom: 24px;
+      }
+
+      #auth-status.error {
+        color: #f87171;
+      }
+
+      .auth-card button {
+        width: 100%;
+        padding: 14px 18px;
+        border-radius: 10px;
+        border: none;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .auth-card button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .google-btn {
+        background: #ffffff;
+        color: #1a1a2e;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+      }
+
+      .google-btn:hover:not(:disabled) {
+        transform: translateY(-2px);
+      }
+
+      .auth-card small {
+        display: block;
+        margin-top: 16px;
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.55);
+      }
+
+      /* Show overlay in portrait mode on mobile */
+      @media screen and (orientation: portrait) and (max-width: 1024px) {
+        #rotate-overlay {
+          display: flex;
+        }
+        #game-container {
+          display: none;
+        }
+      }
+
+      @media screen and (orientation: landscape) {
+        #rotate-overlay {
+          display: none !important;
+        }
+        #game-container {
+          display: flex !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="auth-overlay" class="hidden">
+      <div class="auth-card">
+        <h1>Google 로그인</h1>
+        <p id="auth-status">멀티 플레이를 이용하려면 Google 로그인 후 진행해주세요.</p>
+        <button id="google-login" class="google-btn">Google 계정으로 계속</button>
+        <small>로그인 시 순시미 약관 및 개인정보 처리방침에 동의하게 됩니다.</small>
+      </div>
+    </div>
+    <div id="rotate-overlay">
+      <div class="rotate-icon">📱</div>
+      <div class="rotate-text">화면을 가로로 돌려주세요</div>
+      <div class="rotate-subtext">Please rotate your device to landscape mode</div>
+    </div>
+    <div id="loading">
+      <div class="loading-spinner"></div>
+      <div class="loading-text">고스톱</div>
+      <div class="loading-progress" id="loading-progress">로딩 중...</div>
+    </div>
+    <div id="game-container"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

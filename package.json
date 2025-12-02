@@ -1,0 +1,25 @@
+{
+  "name": "gostop-pixi",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "High-performance Go-Stop (Korean card game) built with PixiJS",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "@pixi/sound": "^6.0.1",
+    "firebase": "^11.10.0",
+    "gsap": "^3.12.5",
+    "pixi.js": "^8.6.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vite-plugin-pwa": "^0.21.1",
+    "workbox-window": "^7.3.0"
+  }
+}
