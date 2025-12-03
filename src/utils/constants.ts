@@ -104,6 +104,17 @@ export const FIREBASE_PATHS = {
   USERS: 'users',
   MATCHES: 'matches',
   LEADERBOARD: 'leaderboard',
+  COIN_TRANSACTIONS: 'coinTransactions',
+} as const;
+
+// 코인 관련 상수
+export const COIN_CONSTANTS = {
+  SIGNUP_BONUS: 100,              // 가입 시 지급 코인
+  ATTENDANCE_REWARD: 10,          // 출석 체크 보상
+  DONATION_AMOUNT: 10,            // 기부 금액
+  MIN_COINS_FOR_GAME: 10,         // 게임 참여 최소 코인
+  POINTS_TO_COINS_RATIO: 1,       // 1점 = 1코인
+  RANKING_LIMIT: 100,             // 랭킹 표시 인원
 } as const;
 
 // Colors

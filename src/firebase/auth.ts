@@ -10,7 +10,7 @@ import {
 import { ref, set, get, update } from 'firebase/database';
 import { getFirebaseAuth, getRealtimeDatabase } from './config';
 import { UserData } from '@utils/types';
-import { FIREBASE_PATHS } from '@utils/constants';
+import { FIREBASE_PATHS, COIN_CONSTANTS } from '@utils/constants';
 
 let currentUser: User | null = null;
 
@@ -58,7 +58,7 @@ async function createOrUpdateUserProfile(user: User): Promise<void> {
   const snapshot = await get(userRef);
 
   if (!snapshot.exists()) {
-    // Create new user profile
+    // Create new user profile with signup bonus coins
     const userData: UserData = {
       id: user.uid,
       name: user.displayName || `Guest_${user.uid.slice(0, 6)}`,
@@ -66,6 +66,7 @@ async function createOrUpdateUserProfile(user: User): Promise<void> {
       losses: 0,
       rating: 1000,
       createdAt: Date.now(),
+      coins: COIN_CONSTANTS.SIGNUP_BONUS, // 가입 보너스 100코인
     };
 
     await set(userRef, userData);

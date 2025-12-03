@@ -211,6 +211,144 @@
         color: rgba(255, 255, 255, 0.55);
       }
 
+      /* PWA Install Prompt */
+      #pwa-install-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(10, 10, 20, 0.95);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 10001;
+        transition: opacity 0.3s ease;
+      }
+
+      #pwa-install-overlay.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .pwa-card {
+        background: rgba(22, 33, 62, 0.98);
+        border: 1px solid rgba(233, 69, 96, 0.3);
+        border-radius: 20px;
+        padding: 28px 32px;
+        width: min(92%, 400px);
+        box-shadow: 0 25px 70px rgba(0, 0, 0, 0.5);
+        text-align: center;
+      }
+
+      .pwa-icon {
+        font-size: 56px;
+        margin-bottom: 16px;
+      }
+
+      .pwa-card h2 {
+        font-size: 22px;
+        margin-bottom: 12px;
+        color: #ffffff;
+        font-weight: 700;
+      }
+
+      .pwa-card p {
+        font-size: 15px;
+        color: rgba(255, 255, 255, 0.8);
+        margin-bottom: 20px;
+        line-height: 1.5;
+      }
+
+      .pwa-guide {
+        display: none;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 20px;
+        text-align: left;
+      }
+
+      .pwa-guide-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: #e94560;
+        margin-bottom: 12px;
+      }
+
+      .pwa-step {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 10px;
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.9);
+      }
+
+      .pwa-step:last-child {
+        margin-bottom: 0;
+      }
+
+      .pwa-step-num {
+        width: 24px;
+        height: 24px;
+        background: #e94560;
+        border-radius: 50%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-size: 12px;
+        font-weight: 700;
+        flex-shrink: 0;
+      }
+
+      .pwa-step-icon {
+        font-size: 18px;
+      }
+
+      .pwa-buttons {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+      }
+
+      .pwa-btn {
+        padding: 14px 24px;
+        border-radius: 10px;
+        border: none;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .pwa-btn-primary {
+        background: linear-gradient(135deg, #e94560, #c73e54);
+        color: #ffffff;
+        box-shadow: 0 8px 20px rgba(233, 69, 96, 0.3);
+      }
+
+      .pwa-btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 28px rgba(233, 69, 96, 0.4);
+      }
+
+      .pwa-btn-secondary {
+        background: rgba(255, 255, 255, 0.1);
+        color: rgba(255, 255, 255, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+      }
+
+      .pwa-btn-secondary:hover {
+        background: rgba(255, 255, 255, 0.15);
+      }
+
+      .pwa-note {
+        margin-top: 16px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.5);
+      }
+
       /* Show overlay in portrait mode on mobile */
       @media screen and (orientation: portrait) and (max-width: 1024px) {
         #rotate-overlay {
@@ -232,6 +370,61 @@
     </style>
   </head>
   <body>
+    <!-- PWA Install Prompt -->
+    <div id="pwa-install-overlay" class="hidden">
+      <div class="pwa-card">
+        <div class="pwa-icon">🎴</div>
+        <h2>홈 화면에 추가하시겠습니까?</h2>
+        <p>홈 화면에 추가하면 앱처럼<br>전체화면으로 빠르게 플레이할 수 있습니다!</p>
+
+        <!-- iOS 안내 -->
+        <div id="pwa-ios-guide" class="pwa-guide">
+          <div class="pwa-guide-title">Safari에서 추가하는 방법</div>
+          <div class="pwa-step">
+            <span class="pwa-step-num">1</span>
+            <span class="pwa-step-icon">⬆️</span>
+            <span>하단의 <b>공유</b> 버튼 탭</span>
+          </div>
+          <div class="pwa-step">
+            <span class="pwa-step-num">2</span>
+            <span class="pwa-step-icon">➕</span>
+            <span><b>홈 화면에 추가</b> 선택</span>
+          </div>
+          <div class="pwa-step">
+            <span class="pwa-step-num">3</span>
+            <span class="pwa-step-icon">✓</span>
+            <span>우측 상단 <b>추가</b> 탭</span>
+          </div>
+        </div>
+
+        <!-- Android 안내 -->
+        <div id="pwa-android-guide" class="pwa-guide">
+          <div class="pwa-guide-title">홈 화면에 추가하는 방법</div>
+          <div class="pwa-step">
+            <span class="pwa-step-num">1</span>
+            <span class="pwa-step-icon">⋮</span>
+            <span>브라우저 <b>메뉴</b> 버튼 탭</span>
+          </div>
+          <div class="pwa-step">
+            <span class="pwa-step-num">2</span>
+            <span class="pwa-step-icon">📲</span>
+            <span><b>홈 화면에 추가</b> 또는 <b>앱 설치</b> 선택</span>
+          </div>
+          <div class="pwa-step">
+            <span class="pwa-step-num">3</span>
+            <span class="pwa-step-icon">✓</span>
+            <span><b>설치</b> 또는 <b>추가</b> 탭</span>
+          </div>
+        </div>
+
+        <div class="pwa-buttons">
+          <button id="pwa-install-btn" class="pwa-btn pwa-btn-primary">확인</button>
+          <button id="pwa-later-btn" class="pwa-btn pwa-btn-secondary">나중에</button>
+        </div>
+        <div class="pwa-note">이 안내는 한 번만 표시됩니다</div>
+      </div>
+    </div>
+
     <div id="auth-overlay" class="hidden">
       <div class="auth-card">
         <h1>Google 로그인</h1>

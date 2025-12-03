@@ -348,18 +348,48 @@ export class GameScene extends Scene {
         try {
           // 승자 ID 결정 (host가 항상 player)
           let winnerId: string;
+          let loserId: string;
           if (result.winner === 'player') {
             winnerId = this.multiplayerPlayers.host.id;
+            loserId = this.multiplayerPlayers.guest?.id ?? 'unknown';
           } else if (result.winner === 'opponent') {
             winnerId = this.multiplayerPlayers.guest?.id ?? 'unknown';
+            loserId = this.multiplayerPlayers.host.id;
           } else {
             winnerId = 'draw'; // 무승부
+            loserId = 'draw';
           }
 
           await this.gameSync.endGame(winnerId, {
             player: result.playerScore?.total ?? 0,
             opponent: result.opponentScore?.total ?? 0,
           });
+
+          // Get current room data for round number
+          const db = getRealtimeDatabase();
+          const roomRef = ref(db, `${FIREBASE_PATHS.ROOMS}/${this.roomId}`);
+          const roomSnapshot = await get(roomRef);
+          const room = roomSnapshot.exists() ? roomSnapshot.val() as RoomData : null;
+
+          // Pass multiplayer-specific data to result scene
+          const multiplayerResult = {
+            ...result,
+            isMultiplayer: true,
+            roomId: this.roomId,
+            isHost: this.multiplayerRole === 'host',
+            winnerId,
+            loserId,
+            winnerName: result.winner === 'player'
+              ? this.multiplayerPlayers.host.name
+              : this.multiplayerPlayers.guest?.name ?? '상대',
+            loserName: result.winner === 'player'
+              ? this.multiplayerPlayers.guest?.name ?? '상대'
+              : this.multiplayerPlayers.host.name,
+            roundNumber: room?.roundNumber ?? 1,
+          };
+
+          this.changeScene('result', multiplayerResult);
+          return;
         } catch (error) {
           console.error('Failed to update game end status:', error);
         }
@@ -1079,14 +1109,18 @@ export class GameScene extends Scene {
 
     console.log('[applyRemoteState] isLocalHost:', isLocalHost, 'state.currentTurn:', state.currentTurn);
 
-    // 게스트: 플레이어 이름 표시 (게스트 입장에서 자신이 player, 호스트가 opponent)
-    if (!isLocalHost && this.multiplayerPlayers.guest) {
-      this.playerCollectedDisplay.setPlayerName(this.multiplayerPlayers.guest.name);
-      this.opponentCollectedDisplay.setPlayerName(this.multiplayerPlayers.host.name);
-    }
-
     const localState = isLocalHost ? state.player : state.opponent;
     const remoteState = isLocalHost ? state.opponent : state.player;
+
+    // 플레이어 이름 표시 (GameState에서 이름 가져오기)
+    // 호스트: player=자신, opponent=게스트
+    // 게스트: player=호스트(상대방에서 가져옴), opponent=자신(로컬에서 가져옴)
+    const localName = localState?.name ?? (isLocalHost ? '나' : '나');
+    const remoteName = remoteState?.name ?? '상대';
+    this.playerCollectedDisplay.setPlayerName(localName);
+    this.opponentCollectedDisplay.setPlayerName(remoteName);
+
+    console.log('[applyRemoteState] Setting names - local:', localName, 'remote:', remoteName);
 
     const normalizeHand = (hand?: CardData[]) => hand ?? [];
     const normalizeCollected = (collected?: PlayerState['collected']) => ({

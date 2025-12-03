@@ -8,7 +8,8 @@ import {
 } from 'firebase/database';
 import { getRealtimeDatabase } from './config';
 import { getCurrentUserId } from './auth';
-import { GameState, GameAction, CardData } from '@utils/types';
+import { settleGameCoins, getUserCoins } from './coinService';
+import { GameState, GameAction, CardData, ContinueGameConsent } from '@utils/types';
 import { FIREBASE_PATHS } from '@utils/constants';
 
 export class GameSync {
@@ -153,6 +154,121 @@ export class GameSync {
       status: 'finished',
       winner: winnerId,
       finalScores,
+      endedAt: Date.now(),
+    });
+  }
+
+  /**
+   * 게임 종료 후 코인 정산
+   * @param winnerId 승자 ID
+   * @param loserId 패자 ID
+   * @param winnerScore 승자 점수 (점수 곱하기 룰 적용된 최종 점수)
+   */
+  async settleCoins(
+    winnerId: string,
+    loserId: string,
+    winnerScore: number
+  ): Promise<{
+    success: boolean;
+    winnerCoins: number;
+    loserCoins: number;
+    transferAmount: number;
+    loserBankrupt: boolean;
+  }> {
+    const result = await settleGameCoins(winnerId, loserId, winnerScore, this.roomId);
+
+    // 코인 정보를 방에 기록
+    if (result.success) {
+      await update(ref(this.database, `${FIREBASE_PATHS.ROOMS}/${this.roomId}`), {
+        lastGameResult: {
+          winnerId,
+          winnerScore,
+          loserScore: 0, // 패자 점수는 정산에 사용되지 않음
+          coinTransfer: result.transferAmount,
+        },
+        hostCoins: winnerId === (await this.getHostId()) ? result.winnerCoins : result.loserCoins,
+        guestCoins: winnerId === (await this.getHostId()) ? result.loserCoins : result.winnerCoins,
+      });
+    }
+
+    return result;
+  }
+
+  private async getHostId(): Promise<string> {
+    const roomRef = ref(this.database, `${FIREBASE_PATHS.ROOMS}/${this.roomId}/host`);
+    const snapshot = await get(roomRef);
+    return snapshot.val() as string;
+  }
+
+  /**
+   * 연속 게임 동의 요청
+   */
+  async requestContinueGame(roundNumber: number): Promise<void> {
+    await update(ref(this.database, `${FIREBASE_PATHS.ROOMS}/${this.roomId}`), {
+      status: 'waiting_consent',
+      continueConsent: {
+        hostConsent: undefined,
+        guestConsent: undefined,
+        roundNumber,
+      } as ContinueGameConsent,
+    });
+  }
+
+  /**
+   * 연속 게임 동의 응답
+   */
+  async respondContinueGame(isHost: boolean, consent: boolean): Promise<void> {
+    const consentField = isHost ? 'continueConsent/hostConsent' : 'continueConsent/guestConsent';
+    await update(ref(this.database, `${FIREBASE_PATHS.ROOMS}/${this.roomId}`), {
+      [consentField]: consent,
+    });
+  }
+
+  /**
+   * 연속 게임 동의 상태 감시
+   */
+  onContinueConsentChange(callback: (consent: ContinueGameConsent | null) => void): void {
+    const consentRef = ref(this.database, `${FIREBASE_PATHS.ROOMS}/${this.roomId}/continueConsent`);
+    const unsubscribe = onValue(consentRef, (snapshot: DataSnapshot) => {
+      if (snapshot.exists()) {
+        callback(snapshot.val() as ContinueGameConsent);
+      } else {
+        callback(null);
+      }
+    });
+    this.unsubscribers.push(unsubscribe);
+  }
+
+  /**
+   * 새 라운드 시작
+   */
+  async startNewRound(roundNumber: number): Promise<void> {
+    // 현재 호스트/게스트 코인 업데이트
+    const roomRef = ref(this.database, `${FIREBASE_PATHS.ROOMS}/${this.roomId}`);
+    const roomSnapshot = await get(roomRef);
+    const room = roomSnapshot.val();
+
+    const hostCoins = await getUserCoins(room.host);
+    const guestCoins = room.guest ? await getUserCoins(room.guest) : 0;
+
+    await update(roomRef, {
+      status: 'playing',
+      roundNumber,
+      continueConsent: null,
+      lastGameResult: null,
+      gameState: null, // 게임 상태 초기화
+      hostCoins,
+      guestCoins,
+    });
+  }
+
+  /**
+   * 게임 방 종료 (연속 게임 거부 또는 코인 소진)
+   */
+  async closeRoom(reason: string): Promise<void> {
+    await update(ref(this.database, `${FIREBASE_PATHS.ROOMS}/${this.roomId}`), {
+      status: 'finished',
+      closeReason: reason,
       endedAt: Date.now(),
     });
   }

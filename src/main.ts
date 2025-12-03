@@ -1,6 +1,33 @@
 import { Game } from '@game/Game';
 import { initializeFirebase } from '@fb/config';
 import { initializeAuthOverlay } from '@ui/AuthOverlay';
+import { pwaInstallManager } from '@utils/pwaInstall';
+
+// Setup PWA install prompt for mobile devices
+function setupPWAInstallPrompt(): void {
+  const installBtn = document.getElementById('pwa-install-btn');
+  const laterBtn = document.getElementById('pwa-later-btn');
+
+  // 버튼 이벤트 핸들러 설정
+  installBtn?.addEventListener('click', async () => {
+    // Android에서 네이티브 설치 가능하면 설치 실행
+    if (pwaInstallManager.canInstallNatively()) {
+      await pwaInstallManager.installAndroid();
+    }
+    pwaInstallManager.hidePrompt();
+  });
+
+  laterBtn?.addEventListener('click', () => {
+    pwaInstallManager.hidePrompt();
+  });
+
+  // 게임 로딩 완료 후 약간의 딜레이 후 프롬프트 표시
+  setTimeout(() => {
+    if (pwaInstallManager.shouldShowPrompt()) {
+      pwaInstallManager.showPrompt();
+    }
+  }, 2000);
+}
 
 // Try to lock screen orientation to landscape
 async function lockLandscapeOrientation(): Promise<void> {
@@ -53,6 +80,9 @@ async function init(): Promise<void> {
 
     // Try to lock to landscape orientation on mobile
     lockLandscapeOrientation();
+
+    // Setup PWA install prompt
+    setupPWAInstallPrompt();
 
     // Handle visibility change for pause/resume
     document.addEventListener('visibilitychange', () => {

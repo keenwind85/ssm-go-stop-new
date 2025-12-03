@@ -15,8 +15,9 @@ import {
 } from 'firebase/database';
 import { getRealtimeDatabase } from './config';
 import { getCurrentUser, getCurrentUserId } from './auth';
+import { canJoinGame } from './coinService';
 import { RoomData } from '@utils/types';
-import { FIREBASE_PATHS } from '@utils/constants';
+import { FIREBASE_PATHS, COIN_CONSTANTS } from '@utils/constants';
 import { generateId } from '@utils/helpers';
 
 export class Matchmaking {
@@ -65,6 +66,12 @@ export class Matchmaking {
   async createRoom(roomName?: string): Promise<string> {
     const userId = getCurrentUserId();
     if (!userId) throw new Error('User not authenticated');
+
+    // 코인 체크
+    const { canJoin, currentCoins } = await canJoinGame(userId);
+    if (!canJoin) {
+      throw new Error(`코인이 부족하여 게임을 진행할 수 없습니다. (현재: ${currentCoins}코인, 필요: ${COIN_CONSTANTS.MIN_COINS_FOR_GAME}코인)\n내일 방문해서 코인 획득 후 게임을 즐겨보세요.`);
+    }
 
     // Check if user already has an active room
     const existingRoomId = await this.findExistingRoomByHost(userId);
@@ -176,6 +183,12 @@ export class Matchmaking {
   async requestJoinRoom(roomId: string): Promise<void> {
     const userId = getCurrentUserId();
     if (!userId) throw new Error('User not authenticated');
+
+    // 코인 체크
+    const { canJoin, currentCoins } = await canJoinGame(userId);
+    if (!canJoin) {
+      throw new Error(`코인이 부족하여 게임을 진행할 수 없습니다. (현재: ${currentCoins}코인, 필요: ${COIN_CONSTANTS.MIN_COINS_FOR_GAME}코인)\n내일 방문해서 코인 획득 후 게임을 즐겨보세요.`);
+    }
 
     const roomRef = ref(this.database, `${FIREBASE_PATHS.ROOMS}/${roomId}`);
     const snapshot = await get(roomRef);
