@@ -61,6 +61,7 @@ export class GameScene extends Scene {
   private joinRequestPrompt: Container | null = null;
   private activeJoinRequestId: string | null = null;
   private hasInitializedMultiplayerSystems = false;
+  private lastReceivedGameState: GameState | null = null;
 
   constructor(app: Application) {
     super(app);
@@ -708,7 +709,16 @@ export class GameScene extends Scene {
         return;
       }
 
-      // 호스트에게 카드 플레이 액션 전달 (턴 체크는 호스트가 함)
+      // 턴 체크 - 내 턴이 아니면 알림 표시
+      if (!this.isMyTurn()) {
+        console.warn('[Guest] Not my turn, showing notification');
+        if (this.hud) {
+          this.hud.showNotification('상대방의 차례입니다.');
+        }
+        return;
+      }
+
+      // 호스트에게 카드 플레이 액션 전달
       console.log('[Guest] Sending PLAY_CARD action to Firebase:', card.cardData.id, 'month:', card.getMonth());
       this.gameSync.playCard(card.cardData.id, {
         targetMonth: card.getMonth(),
@@ -716,6 +726,9 @@ export class GameScene extends Scene {
         console.log('[Guest] PLAY_CARD action sent successfully');
       }).catch((error) => {
         console.error('[Guest] Failed to send PLAY_CARD action:', error);
+        if (this.hud) {
+          this.hud.showNotification('카드를 낼 수 없습니다.');
+        }
       });
     });
 
@@ -736,11 +749,23 @@ export class GameScene extends Scene {
         return;
       }
 
+      // 턴 체크 - 내 턴이 아니면 알림 표시
+      if (!this.isMyTurn()) {
+        console.warn('[Guest] Not my turn for field selection, showing notification');
+        if (this.hud) {
+          this.hud.showNotification('상대방의 차례입니다.');
+        }
+        return;
+      }
+
       console.log('[Guest] Sending SELECT_FIELD_CARD action to Firebase');
       this.gameSync.selectFieldCard(card.cardData.id).then(() => {
         console.log('[Guest] SELECT_FIELD_CARD action sent successfully');
       }).catch((error) => {
         console.error('[Guest] Failed to send SELECT_FIELD_CARD action:', error);
+        if (this.hud) {
+          this.hud.showNotification('필드 카드를 선택할 수 없습니다.');
+        }
       });
     });
 
@@ -1101,8 +1126,32 @@ export class GameScene extends Scene {
     }
   }
 
+  private isMyTurn(): boolean {
+    if (!this.lastReceivedGameState || !this.multiplayerPlayers) return false;
+
+    const currentUserId = getCurrentUserId();
+    const isLocalHost = currentUserId === this.multiplayerPlayers.host.id;
+    const state = this.lastReceivedGameState;
+
+    // 호스트: state.currentTurn이 'player'면 내 턴
+    // 게스트: state.currentTurn이 'opponent'면 내 턴 (호스트의 opponent = 게스트)
+    const myTurn = isLocalHost ? state.currentTurn === 'player' : state.currentTurn === 'opponent';
+
+    console.log('[isMyTurn]', {
+      isLocalHost,
+      'state.currentTurn': state.currentTurn,
+      myTurn,
+      'state.phase': state.phase,
+    });
+
+    return myTurn && state.phase !== 'waiting' && state.phase !== 'dealing';
+  }
+
   private applyRemoteState(state: GameState): void {
     if (!this.multiplayerPlayers) return;
+
+    // Store the state for turn checking
+    this.lastReceivedGameState = state;
 
     const currentUserId = getCurrentUserId();
     const isLocalHost = currentUserId === this.multiplayerPlayers.host.id;
