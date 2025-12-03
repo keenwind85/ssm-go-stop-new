@@ -45,6 +45,17 @@ export interface GameState {
   player: PlayerState;
   opponent: PlayerState;
   lastAction?: GameAction;
+  selectionContext?: {
+    type: 'deck';
+    options: CardData[];
+    drawnCard: CardData;
+    requiredFor: 'player' | 'opponent';
+  };
+  goStopContext?: {
+    player: 'player' | 'opponent';
+    score: number;
+    goCount: number;
+  };
 }
 
 // Game actions

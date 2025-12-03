@@ -11,6 +11,7 @@ import {
   equalTo,
   limitToFirst,
   DataSnapshot,
+  type DatabaseReference,
 } from 'firebase/database';
 import { getRealtimeDatabase } from './config';
 import { getCurrentUserId } from './auth';
@@ -29,25 +30,15 @@ export class Matchmaking {
 
     // Look for waiting rooms
     const roomsRef = ref(this.database, FIREBASE_PATHS.ROOMS);
-    const waitingQuery = query(
-      roomsRef,
-      orderByChild('status'),
-      equalTo('waiting'),
-      limitToFirst(1)
-    );
+    const waitingRoomId = await this.findWaitingRoomId(roomsRef);
 
-    const snapshot = await get(waitingQuery);
-
-    if (snapshot.exists()) {
-      // Join existing room
-      const rooms = snapshot.val();
-      const roomId = Object.keys(rooms)[0];
-      await this.joinRoom(roomId);
-      return roomId;
-    } else {
-      // Create new room
-      return await this.createRoom();
+    if (waitingRoomId) {
+      await this.joinRoom(waitingRoomId);
+      return waitingRoomId;
     }
+
+    // Create new room when no waiting opponents are available
+    return await this.createRoom();
   }
 
   async createRoom(): Promise<string> {
@@ -183,5 +174,53 @@ export class Matchmaking {
 
   getCurrentRoomId(): string | null {
     return this.currentRoomId;
+  }
+
+  private async findWaitingRoomId(roomsRef: DatabaseReference): Promise<string | null> {
+    const waitingQuery = query(
+      roomsRef,
+      orderByChild('status'),
+      equalTo('waiting'),
+      limitToFirst(1)
+    );
+
+    try {
+      const snapshot = await get(waitingQuery);
+      if (!snapshot.exists()) return null;
+      const rooms = snapshot.val() as Record<string, RoomData> | null;
+      return this.findWaitingRoomIdInData(rooms);
+    } catch (error) {
+      if (this.isMissingIndexError(error)) {
+        console.warn(
+          '[Matchmaking] Missing Realtime Database index on rooms.status – falling back to client-side filtering.'
+        );
+        const fallbackSnapshot = await get(roomsRef);
+        if (!fallbackSnapshot.exists()) return null;
+        const rooms = fallbackSnapshot.val() as Record<string, RoomData> | null;
+        return this.findWaitingRoomIdInData(rooms);
+      }
+
+      throw error;
+    }
+  }
+
+  private findWaitingRoomIdInData(
+    rooms: Record<string, RoomData> | null | undefined
+  ): string | null {
+    if (!rooms) return null;
+    for (const [roomId, room] of Object.entries(rooms)) {
+      if (room?.status === 'waiting') {
+        return roomId;
+      }
+    }
+    return null;
+  }
+
+  private isMissingIndexError(error: unknown): boolean {
+    return (
+      error instanceof Error &&
+      /index not defined/i.test(error.message ?? '') &&
+      error.message.includes('/rooms')
+    );
   }
 }

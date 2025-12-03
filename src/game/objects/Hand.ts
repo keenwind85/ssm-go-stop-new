@@ -1,6 +1,7 @@
 import { Container, Texture } from 'pixi.js';
 import { Card } from './Card';
 import { CARD_WIDTH, LAYOUT } from '@utils/constants';
+import type { CardData } from '@utils/types';
 
 export class Hand extends Container {
   private cards: Card[] = [];
@@ -125,6 +126,10 @@ export class Hand extends Container {
     return [...this.cards];
   }
 
+  getCardData(): CardData[] {
+    return this.cards.map(card => card.cardData);
+  }
+
   getCardCount(): number {
     return this.cards.length;
   }
@@ -145,5 +150,29 @@ export class Hand extends Container {
   sortByMonth(): void {
     this.cards.sort((a, b) => a.getMonth() - b.getMonth());
     this.arrangeCards();
+  }
+
+  setCardsFromData(cardData: CardData[], options?: { showFront?: boolean }): void {
+    this.clear();
+
+    const showFront = options?.showFront ?? this.isPlayer;
+
+    cardData.forEach(data => {
+      const card = new Card(data);
+      if (!showFront) {
+        try {
+          card.texture = Texture.from('card_back');
+        } catch {
+          // fallback to default texture already assigned in constructor
+        }
+      }
+      this.addCard(card);
+    });
+
+    if (this.isPlayer) {
+      this.sortByMonth();
+    } else {
+      this.arrangeCards();
+    }
   }
 }

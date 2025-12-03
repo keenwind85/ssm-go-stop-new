@@ -209,6 +209,23 @@ export class Deck extends Container {
     return this.cards.length;
   }
 
+  getRemainingCardData(): CardData[] {
+    return this.cards.map(card => card.cardData);
+  }
+
+  setFromCardData(cardData: CardData[]): void {
+    // Remove current cards from display
+    this.cards.forEach(card => {
+      if (card.parent) {
+        card.parent.removeChild(card);
+      }
+    });
+
+    this.cards = cardData.map((data) => new Card(data));
+    this.deckContainer.visible = this.cards.length > 0;
+    this.updateCountDisplay();
+  }
+
   reset(): void {
     // Remove all cards from display
     this.cards.forEach(card => {

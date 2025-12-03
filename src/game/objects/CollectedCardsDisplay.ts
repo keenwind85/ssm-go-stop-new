@@ -1,7 +1,7 @@
 import { Container, Graphics, Text, TextStyle, Sprite, Texture } from 'pixi.js';
 import { Card } from './Card';
 import { COLORS } from '@utils/constants';
-import { CardType } from '@utils/types';
+import { CardType, CardData } from '@utils/types';
 
 interface CollectedCardGroup {
   container: Container;
@@ -155,6 +155,15 @@ export class CollectedCardsDisplay extends Container {
     this.updateGroupCards('animal', cardGroups.animal);
     this.updateGroupCards('ribbon', cardGroups.ribbon);
     this.updateGroupCards('pi', cardGroups.pi);
+  }
+
+  updateFromCardData(cardGroups: { kwang: CardData[]; animal: CardData[]; ribbon: CardData[]; pi: CardData[] }): void {
+    this.updateFromCards({
+      kwang: cardGroups.kwang.map(data => new Card(data)),
+      animal: cardGroups.animal.map(data => new Card(data)),
+      ribbon: cardGroups.ribbon.map(data => new Card(data)),
+      pi: cardGroups.pi.map(data => new Card(data)),
+    });
   }
 
   private updateGroupCards(type: CardType, cards: Card[]): void {

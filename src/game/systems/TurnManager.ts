@@ -4,7 +4,7 @@ import { Field } from '@game/objects/Field';
 import { Hand } from '@game/objects/Hand';
 import { Card } from '@game/objects/Card';
 import { ScoreCalculator } from './ScoreCalculator';
-import { GamePhase } from '@utils/types';
+import { GamePhase, ScoreBreakdown } from '@utils/types';
 import { delay } from '@utils/helpers';
 
 interface TurnManagerConfig {
@@ -652,6 +652,29 @@ export class TurnManager extends EventEmitter {
 
   getTurnNumber(): number {
     return this.turnNumber;
+  }
+
+  getCollectedCards(player: 'player' | 'opponent'): Card[] {
+    return player === 'player' ? [...this.playerCollected] : [...this.opponentCollected];
+  }
+
+  getGoCount(player: 'player' | 'opponent'): number {
+    return player === 'player' ? this.playerGoCount : this.opponentGoCount;
+  }
+
+  hasShake(player: 'player' | 'opponent'): boolean {
+    return player === 'player' ? this.playerHasShake : this.opponentHasShake;
+  }
+
+  hasPpuk(player: 'player' | 'opponent'): boolean {
+    return player === 'player' ? this.playerHasPpuk : this.opponentHasPpuk;
+  }
+
+  getScoreBreakdown(player: 'player' | 'opponent'): ScoreBreakdown {
+    if (player === 'player') {
+      return this.scoreCalculator.calculate(this.playerCollected);
+    }
+    return this.scoreCalculator.calculate(this.opponentCollected);
   }
 
   update(_deltaTime: number): void {

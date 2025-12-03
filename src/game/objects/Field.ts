@@ -1,6 +1,7 @@
 import { Container } from 'pixi.js';
 import { Card } from './Card';
 import { CARD_WIDTH, CARD_HEIGHT } from '@utils/constants';
+import type { CardData } from '@utils/types';
 
 export class Field extends Container {
   private cards: Map<number, Card[]> = new Map();
@@ -53,6 +54,14 @@ export class Field extends Container {
 
   getMatchingCards(month: number): Card[] {
     return this.cards.get(month) || [];
+  }
+
+  getCardById(cardId: string): Card | undefined {
+    for (const monthCards of this.cards.values()) {
+      const found = monthCards.find(card => card.getId() === cardId);
+      if (found) return found;
+    }
+    return undefined;
   }
 
   hasMatch(month: number): boolean {
@@ -127,6 +136,10 @@ export class Field extends Container {
     return allCards;
   }
 
+  getCardData(): CardData[] {
+    return this.getAllCards().map(card => card.cardData);
+  }
+
   getCardCount(): number {
     let count = 0;
     this.cards.forEach(monthCards => {
@@ -145,5 +158,13 @@ export class Field extends Container {
     for (let month = 1; month <= 12; month++) {
       this.cards.set(month, []);
     }
+  }
+
+  setCardsFromData(cardData: CardData[]): void {
+    this.clear();
+    cardData.forEach(data => {
+      const card = new Card(data);
+      this.addCard(card);
+    });
   }
 }

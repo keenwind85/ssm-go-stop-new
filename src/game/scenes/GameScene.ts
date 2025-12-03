@@ -1,6 +1,6 @@
 import { Application, Graphics, Container, Ticker, Text, TextStyle } from 'pixi.js';
 import { Scene } from './Scene';
-import { GAME_WIDTH, GAME_HEIGHT, COLORS, POSITIONS, LAYERS, LAYOUT } from '@utils/constants';
+import { GAME_WIDTH, GAME_HEIGHT, COLORS, POSITIONS, LAYERS, LAYOUT, FIREBASE_PATHS } from '@utils/constants';
 import { Deck } from '@game/objects/Deck';
 import { Field } from '@game/objects/Field';
 import { Hand } from '@game/objects/Hand';
@@ -9,6 +9,11 @@ import { CollectedCardsDisplay } from '@game/objects/CollectedCardsDisplay';
 import { HUD } from '@ui/HUD';
 import { TurnManager } from '@game/systems/TurnManager';
 import { ScoreCalculator } from '@game/systems/ScoreCalculator';
+import { getCurrentUserId, getUserProfile } from '@fb/auth';
+import { getRealtimeDatabase } from '@fb/config';
+import { ref, get } from 'firebase/database';
+import { GameSync } from '@fb/gameSync';
+import type { GameState, RoomData, CardData, PlayerState } from '@utils/types';
 
 interface GameSceneData {
   mode: 'ai' | 'multiplayer';
@@ -40,8 +45,16 @@ export class GameScene extends Scene {
   private hud!: HUD;
 
   // Game systems
-  private turnManager!: TurnManager;
+  private turnManager: TurnManager | null = null;
   private scoreCalculator!: ScoreCalculator;
+  private gameSync: GameSync | null = null;
+  private multiplayerRole: 'host' | 'guest' | null = null;
+  private multiplayerPlayers: {
+    host: { id: string; name: string };
+    guest?: { id: string; name: string };
+  } | null = null;
+  private remoteGameState: GameState | null = null;
+  private hostSyncInterval: number | null = null;
 
   constructor(app: Application) {
     super(app);
@@ -80,7 +93,7 @@ export class GameScene extends Scene {
     this.createBackground();
 
     // Initialize game objects
-    this.initializeGame();
+    await this.initializeGame();
 
     // Start game ticker
     this.app.ticker.add(this.onTick, this);
@@ -88,6 +101,16 @@ export class GameScene extends Scene {
 
   onExit(): void {
     this.app.ticker.remove(this.onTick, this);
+
+    if (this.hostSyncInterval) {
+      window.clearInterval(this.hostSyncInterval);
+      this.hostSyncInterval = null;
+    }
+
+    this.gameSync?.cleanup();
+    this.gameSync = null;
+
+    this.turnManager = null;
 
     this.backgroundLayer.removeChildren();
     this.fieldLayer.removeChildren();
@@ -130,7 +153,17 @@ export class GameScene extends Scene {
     this.backgroundLayer.addChild(rightPanel);
   }
 
-  private initializeGame(): void {
+  private async initializeGame(): Promise<void> {
+    this.setupBaseObjects();
+
+    if (this.gameMode === 'multiplayer') {
+      await this.initializeMultiplayerFlow();
+    } else {
+      await this.initializeLocalGameSystems(this.gameMode === 'ai');
+    }
+  }
+
+  private setupBaseObjects(): void {
     // Initialize deck
     this.deck = new Deck();
     this.deck.position.set(POSITIONS.DECK.x, POSITIONS.DECK.y);
@@ -163,8 +196,9 @@ export class GameScene extends Scene {
     // Initialize HUD
     this.hud = new HUD();
     this.uiLayer.addChild(this.hud);
+  }
 
-    // Initialize game systems
+  private async initializeLocalGameSystems(isAIMode: boolean): Promise<void> {
     this.scoreCalculator = new ScoreCalculator();
     this.turnManager = new TurnManager({
       deck: this.deck,
@@ -172,17 +206,64 @@ export class GameScene extends Scene {
       playerHand: this.playerHand,
       opponentHand: this.opponentHand,
       scoreCalculator: this.scoreCalculator,
-      isAIMode: this.gameMode === 'ai',
+      isAIMode,
     });
 
-    // Setup event handlers
     this.setupEventHandlers();
+    await this.turnManager.dealInitialCards();
+  }
 
-    // Deal initial cards
-    this.turnManager.dealInitialCards();
+  private async initializeMultiplayerFlow(): Promise<void> {
+    if (!this.roomId) {
+      await this.initializeLocalGameSystems(false);
+      return;
+    }
+
+    const db = getRealtimeDatabase();
+    const roomRef = ref(db, `${FIREBASE_PATHS.ROOMS}/${this.roomId}`);
+    const snapshot = await get(roomRef);
+    if (!snapshot.exists()) {
+      await this.initializeLocalGameSystems(false);
+      return;
+    }
+
+    const room = snapshot.val() as RoomData;
+    const currentUserId = getCurrentUserId();
+    if (!currentUserId) {
+      await this.initializeLocalGameSystems(false);
+      return;
+    }
+
+    const role: 'host' | 'guest' = room.host === currentUserId ? 'host' : 'guest';
+    this.multiplayerRole = role;
+    this.gameSync = new GameSync(this.roomId);
+
+    const hostProfile = await getUserProfile(room.host);
+    const guestProfile = room.guest ? await getUserProfile(room.guest) : null;
+    this.multiplayerPlayers = {
+      host: {
+        id: room.host,
+        name: hostProfile?.name ?? 'Host',
+      },
+      guest: room.guest
+        ? {
+            id: room.guest,
+            name: guestProfile?.name ?? 'Guest',
+          }
+        : undefined,
+    };
+
+    if (role === 'host') {
+      await this.initializeLocalGameSystems(false);
+      this.startHostSyncLoop();
+    } else {
+      this.setupGuestView();
+    }
   }
 
   private setupEventHandlers(): void {
+    if (!this.turnManager) return;
+
     // Player card hover - highlight matching field cards
     this.playerHand.on('cardHover', (month: number) => {
       if (this.turnManager.isPlayerTurn()) {
@@ -305,7 +386,9 @@ export class GameScene extends Scene {
   }
 
   private onTick(ticker: Ticker): void {
-    this.turnManager.update(ticker.deltaTime);
+    if (this.turnManager) {
+      this.turnManager.update(ticker.deltaTime);
+    }
     this.hud.updateTimer(ticker.deltaTime);
   }
 
@@ -420,5 +503,130 @@ export class GameScene extends Scene {
       this.goStopContainer.destroy();
       this.goStopContainer = null;
     }
+  }
+
+  private startHostSyncLoop(): void {
+    this.broadcastGameState();
+    if (this.hostSyncInterval) {
+      window.clearInterval(this.hostSyncInterval);
+    }
+    this.hostSyncInterval = window.setInterval(() => {
+      this.broadcastGameState();
+    }, 1000);
+  }
+
+  private async broadcastGameState(): Promise<void> {
+    if (!this.turnManager || !this.gameSync || !this.multiplayerPlayers) return;
+
+    const snapshot = this.buildGameStateSnapshot();
+    try {
+      await this.gameSync.updateGameState(snapshot);
+    } catch (error) {
+      console.warn('Failed to sync game state', error);
+    }
+  }
+
+  private buildGameStateSnapshot(): GameState {
+    const playerCollected = this.turnManager?.getCollectedCards('player') ?? [];
+    const opponentCollected = this.turnManager?.getCollectedCards('opponent') ?? [];
+
+    const playerCollectedGrouped = this.groupCardDataByType(playerCollected);
+    const opponentCollectedGrouped = this.groupCardDataByType(opponentCollected);
+
+    const playerScore = this.turnManager?.getScoreBreakdown('player');
+    const opponentScore = this.turnManager?.getScoreBreakdown('opponent');
+
+    const playerState: PlayerState = {
+      id: this.multiplayerPlayers!.host.id,
+      name: this.multiplayerPlayers!.host.name,
+      hand: this.playerHand.getCardData(),
+      collected: playerCollectedGrouped,
+      score: playerScore?.total ?? 0,
+      goCount: this.turnManager?.getGoCount('player') ?? 0,
+    };
+
+    const opponentInfo = this.multiplayerPlayers?.guest;
+    const opponentState: PlayerState = {
+      id: opponentInfo?.id ?? 'opponent',
+      name: opponentInfo?.name ?? '상대',
+      hand: this.opponentHand.getCardData(),
+      collected: opponentCollectedGrouped,
+      score: opponentScore?.total ?? 0,
+      goCount: this.turnManager?.getGoCount('opponent') ?? 0,
+    };
+
+    return {
+      phase: this.turnManager?.getPhase() ?? 'waiting',
+      currentTurn: this.turnManager?.getCurrentTurn() ?? 'player',
+      turnNumber: this.turnManager?.getTurnNumber() ?? 0,
+      field: this.field.getCardData(),
+      deck: this.deck.getRemainingCardData(),
+      player: playerState,
+      opponent: opponentState,
+    };
+  }
+
+  private groupCardDataByType(cards: Card[]): { kwang: CardData[]; animal: CardData[]; ribbon: CardData[]; pi: CardData[] } {
+    const groups = {
+      kwang: [] as CardData[],
+      animal: [] as CardData[],
+      ribbon: [] as CardData[],
+      pi: [] as CardData[],
+    };
+
+    cards.forEach(card => {
+      groups[card.getType()].push(card.cardData);
+    });
+
+    return groups;
+  }
+
+  private setupGuestView(): void {
+    if (!this.gameSync) return;
+
+    this.gameSync.onGameStateChange((state) => {
+      this.remoteGameState = state;
+      this.applyRemoteState(state);
+    });
+  }
+
+  private applyRemoteState(state: GameState): void {
+    if (!this.multiplayerPlayers) return;
+
+    const currentUserId = getCurrentUserId();
+    const isLocalHost = currentUserId === this.multiplayerPlayers.host.id;
+
+    const localState = isLocalHost ? state.player : state.opponent;
+    const remoteState = isLocalHost ? state.opponent : state.player;
+
+    this.playerHand.setCardsFromData(localState.hand, { showFront: true });
+    this.opponentHand.setCardsFromData(remoteState.hand, { showFront: false });
+
+    this.field.setCardsFromData(state.field);
+    this.deck.setFromCardData(state.deck);
+
+    this.playerCollectedDisplay.updateFromCardData(localState.collected);
+    this.opponentCollectedDisplay.updateFromCardData(remoteState.collected);
+    this.playerCollectedDisplay.updateTotalScore(localState.score);
+    this.opponentCollectedDisplay.updateTotalScore(remoteState.score);
+
+    const localCounts = {
+      kwang: localState.collected.kwang.length,
+      animal: localState.collected.animal.length,
+      ribbon: localState.collected.ribbon.length,
+      pi: localState.collected.pi.length,
+    };
+    const remoteCounts = {
+      kwang: remoteState.collected.kwang.length,
+      animal: remoteState.collected.animal.length,
+      ribbon: remoteState.collected.ribbon.length,
+      pi: remoteState.collected.pi.length,
+    };
+
+    this.hud.updateCollectedCounts(localCounts, remoteCounts);
+    this.hud.updateScores({ player: localState.score, opponent: remoteState.score });
+
+    const localTurn = isLocalHost ? state.currentTurn : state.currentTurn === 'player' ? 'opponent' : 'player';
+    this.hud.updateTurn(localTurn);
   }
 }

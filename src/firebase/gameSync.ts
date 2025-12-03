@@ -52,11 +52,12 @@ export class GameSync {
     });
   }
 
-  async playCard(cardId: string, targetMonth?: number): Promise<void> {
+  async playCard(cardId: string, options?: { targetMonth?: number; targetCardId?: string }): Promise<void> {
     await this.sendAction({
       type: 'PLAY_CARD',
       cardId,
-      targetMonth,
+      targetMonth: options?.targetMonth,
+      targetCardId: options?.targetCardId,
     });
   }
 
