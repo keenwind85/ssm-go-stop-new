@@ -66,6 +66,14 @@ export class Matchmaking {
     const userId = getCurrentUserId();
     if (!userId) throw new Error('User not authenticated');
 
+    // Check if user already has an active room
+    const existingRoomId = await this.findExistingRoomByHost(userId);
+    if (existingRoomId) {
+      // Clean up existing room before creating a new one
+      const existingRoomRef = ref(this.database, `${FIREBASE_PATHS.ROOMS}/${existingRoomId}`);
+      await remove(existingRoomRef);
+    }
+
     const roomId = generateId(8);
     const roomRef = ref(this.database, `${FIREBASE_PATHS.ROOMS}/${roomId}`);
     const displayName = this.getDisplayName();
@@ -84,12 +92,32 @@ export class Matchmaking {
 
     await set(roomRef, roomData);
 
-    // Set up auto-cleanup on disconnect
-    const hostRef = ref(this.database, `${FIREBASE_PATHS.ROOMS}/${roomId}/host`);
-    onDisconnect(hostRef).remove();
+    // Set up auto-cleanup on disconnect - remove entire room when host disconnects
+    onDisconnect(roomRef).remove();
 
     this.currentRoomId = roomId;
     return roomId;
+  }
+
+  private async findExistingRoomByHost(userId: string): Promise<string | null> {
+    const roomsRef = ref(this.database, FIREBASE_PATHS.ROOMS);
+    try {
+      const snapshot = await get(roomsRef);
+      if (!snapshot.exists()) return null;
+
+      const rooms = snapshot.val() as Record<string, RoomData> | null;
+      if (!rooms) return null;
+
+      for (const [roomId, room] of Object.entries(rooms)) {
+        if (room?.host === userId) {
+          return roomId;
+        }
+      }
+      return null;
+    } catch (error) {
+      console.warn('[Matchmaking] Failed to check existing rooms:', error);
+      return null;
+    }
   }
 
   async createNamedRoom(roomName: string): Promise<string> {

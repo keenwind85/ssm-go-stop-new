@@ -611,7 +611,14 @@ export class GameScene extends Scene {
   private setupGuestView(): void {
     if (!this.gameSync) return;
 
+    // Show waiting overlay until host starts the game
+    this.showWaitingOverlay('호스트가 게임을 시작하기를 기다리는 중...');
+
     this.gameSync.onGameStateChange((state) => {
+      // Hide waiting overlay once we receive game state
+      if (state && state.phase !== 'waiting') {
+        this.hideWaitingOverlay();
+      }
       this.applyRemoteState(state);
     });
   }
@@ -670,8 +677,21 @@ export class GameScene extends Scene {
   }
 
   private handleGuestRoomUpdate(room: RoomData): void {
-    if (room.status === 'waiting' || !room.guest) {
+    const currentUserId = getCurrentUserId();
+
+    // Only go back to lobby if:
+    // 1. Room status changed back to waiting (host kicked or game ended), OR
+    // 2. Guest was removed from the room (but not us still being the guest)
+    const wasKickedOrLeft = room.guest !== currentUserId;
+    const gameEnded = room.status === 'finished';
+    const hostCancelled = room.status === 'waiting' && !room.guest;
+
+    if (wasKickedOrLeft || gameEnded || hostCancelled) {
       if (this.hud) {
+        if (gameEnded) {
+          // Game ended normally - handled by gameEnd event
+          return;
+        }
         this.hud.showNotification('호스트가 게임을 종료했습니다. 로비로 돌아갑니다.');
       }
       this.changeScene('lobby');
