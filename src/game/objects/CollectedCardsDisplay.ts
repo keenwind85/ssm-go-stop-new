@@ -1,4 +1,4 @@
-import { Container, Graphics, Text, TextStyle, Sprite, Texture } from 'pixi.js';
+import { Container, Graphics, Text, TextStyle, Sprite, Texture, Ticker } from 'pixi.js';
 import { Card } from './Card';
 import { COLORS } from '@utils/constants';
 import { CardType, CardData } from '@utils/types';
@@ -16,6 +16,11 @@ export class CollectedCardsDisplay extends Container {
   private totalScoreText: Text;
   private background: Graphics;
   private nameLabel: Text;
+  private turnIndicator: Graphics;
+  private turnIndicatorGlow: Graphics;
+  private animationTime: number = 0;
+  private isMyTurn: boolean = false;
+  private tickerFn: ((ticker: Ticker) => void) | null = null;
 
   // Card display dimensions
   private static readonly CARD_WIDTH = 32;
@@ -33,6 +38,18 @@ export class CollectedCardsDisplay extends Container {
     this.background.fill({ color: COLORS.SECONDARY, alpha: 0.7 });
     this.background.stroke({ width: 2, color: isPlayer ? COLORS.PRIMARY : COLORS.WARNING, alpha: 0.8 });
     this.addChild(this.background);
+
+    // Create turn indicator glow (outer circle)
+    this.turnIndicatorGlow = new Graphics();
+    this.turnIndicatorGlow.visible = false;
+    this.addChild(this.turnIndicatorGlow);
+
+    // Create turn indicator (inner circle)
+    this.turnIndicator = new Graphics();
+    this.turnIndicator.circle(0, 0, 6);
+    this.turnIndicator.fill({ color: COLORS.SUCCESS, alpha: 1 });
+    this.turnIndicator.visible = false;
+    this.addChild(this.turnIndicator);
 
     // Create label (player name will be set later for multiplayer)
     this.nameLabel = new Text({
@@ -255,5 +272,71 @@ export class CollectedCardsDisplay extends Container {
 
   setPlayerName(name: string): void {
     this.nameLabel.text = name;
+    this.updateTurnIndicatorPosition();
+  }
+
+  private updateTurnIndicatorPosition(): void {
+    // Position turn indicator to the left of the name label
+    const nameBounds = this.nameLabel.getBounds();
+    const indicatorX = -nameBounds.width / 2 - 15;
+    const indicatorY = -70;
+
+    this.turnIndicator.position.set(indicatorX, indicatorY);
+    this.turnIndicatorGlow.position.set(indicatorX, indicatorY);
+  }
+
+  setTurnActive(isActive: boolean): void {
+    if (this.isMyTurn === isActive) return;
+
+    this.isMyTurn = isActive;
+    this.turnIndicator.visible = isActive;
+    this.turnIndicatorGlow.visible = isActive;
+
+    if (isActive) {
+      this.startTurnAnimation();
+    } else {
+      this.stopTurnAnimation();
+    }
+  }
+
+  private startTurnAnimation(): void {
+    if (this.tickerFn) return; // Already animating
+
+    this.animationTime = 0;
+    this.tickerFn = (ticker: Ticker) => {
+      this.animationTime += ticker.deltaTime * 0.05;
+
+      // Pulse effect: scale between 1.0 and 1.3
+      const scale = 1.0 + Math.sin(this.animationTime) * 0.3;
+      this.turnIndicator.scale.set(scale);
+
+      // Glow effect: fade in/out
+      const glowAlpha = 0.3 + Math.sin(this.animationTime) * 0.3;
+      const glowScale = 1.5 + Math.sin(this.animationTime) * 0.5;
+
+      this.turnIndicatorGlow.clear();
+      this.turnIndicatorGlow.circle(0, 0, 10);
+      this.turnIndicatorGlow.fill({ color: COLORS.SUCCESS, alpha: glowAlpha });
+      this.turnIndicatorGlow.scale.set(glowScale);
+    };
+
+    Ticker.shared.add(this.tickerFn);
+  }
+
+  private stopTurnAnimation(): void {
+    if (this.tickerFn) {
+      Ticker.shared.remove(this.tickerFn);
+      this.tickerFn = null;
+    }
+
+    // Reset to default state
+    this.turnIndicator.scale.set(1);
+    this.turnIndicatorGlow.scale.set(1);
+    this.turnIndicatorGlow.clear();
+  }
+
+  destroy(): void {
+    this.stopTurnAnimation();
+    super.destroy();
   }
 }

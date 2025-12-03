@@ -230,6 +230,10 @@ export class GameScene extends Scene {
 
     this.setupEventHandlers();
     await this.turnManager.dealInitialCards();
+
+    // Set initial turn indicators
+    this.playerCollectedDisplay.setTurnActive(firstTurn === 'player');
+    this.opponentCollectedDisplay.setTurnActive(firstTurn === 'opponent');
   }
 
   private async initializeMultiplayerFlow(): Promise<void> {
@@ -320,8 +324,13 @@ export class GameScene extends Scene {
 
     // Turn events
     turnManager.on('turnEnd', () => {
-      this.hud.updateTurn(turnManager.getCurrentTurn());
+      const currentTurn = turnManager.getCurrentTurn();
+      this.hud.updateTurn(currentTurn);
       this.field.clearAllHighlights();
+
+      // Update turn indicators with animation
+      this.playerCollectedDisplay.setTurnActive(currentTurn === 'player');
+      this.opponentCollectedDisplay.setTurnActive(currentTurn === 'opponent');
     });
 
     turnManager.on('scoreUpdate', (scores) => {
@@ -1214,6 +1223,13 @@ export class GameScene extends Scene {
     const localTurn = isLocalHost ? state.currentTurn : state.currentTurn === 'player' ? 'opponent' : 'player';
     console.log('[applyRemoteState] localTurn computed:', localTurn, '(state.currentTurn:', state.currentTurn, ')');
     this.hud.updateTurn(localTurn);
+
+    // Update turn indicators with animation
+    const isPlayerTurn = localTurn === 'player' && state.phase !== 'waiting' && state.phase !== 'dealing';
+    const isOpponentTurn = localTurn === 'opponent' && state.phase !== 'waiting' && state.phase !== 'dealing';
+
+    this.playerCollectedDisplay.setTurnActive(isPlayerTurn);
+    this.opponentCollectedDisplay.setTurnActive(isOpponentTurn);
 
     // 게스트가 자신의 턴일 때 알림 표시
     if (!isLocalHost && localTurn === 'player' && state.phase !== 'waiting' && state.phase !== 'dealing') {
