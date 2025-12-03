@@ -48,12 +48,10 @@ export class GameScene extends Scene {
   private turnManager: TurnManager | null = null;
   private scoreCalculator!: ScoreCalculator;
   private gameSync: GameSync | null = null;
-  private multiplayerRole: 'host' | 'guest' | null = null;
   private multiplayerPlayers: {
     host: { id: string; name: string };
     guest?: { id: string; name: string };
   } | null = null;
-  private remoteGameState: GameState | null = null;
   private hostSyncInterval: number | null = null;
 
   constructor(app: Application) {
@@ -235,7 +233,6 @@ export class GameScene extends Scene {
     }
 
     const role: 'host' | 'guest' = room.host === currentUserId ? 'host' : 'guest';
-    this.multiplayerRole = role;
     this.gameSync = new GameSync(this.roomId);
 
     const hostProfile = await getUserProfile(room.host);
@@ -262,11 +259,12 @@ export class GameScene extends Scene {
   }
 
   private setupEventHandlers(): void {
-    if (!this.turnManager) return;
+    const turnManager = this.turnManager;
+    if (!turnManager) return;
 
     // Player card hover - highlight matching field cards
     this.playerHand.on('cardHover', (month: number) => {
-      if (this.turnManager.isPlayerTurn()) {
+      if (turnManager.isPlayerTurn()) {
         this.field.highlightMatchingCards(month);
       }
     });
@@ -277,26 +275,26 @@ export class GameScene extends Scene {
 
     // Player card selection
     this.playerHand.on('cardSelected', (card) => {
-      if (this.turnManager.isPlayerTurn()) {
+      if (turnManager.isPlayerTurn()) {
         this.field.clearAllHighlights();
-        this.turnManager.handleCardPlay(card);
+        turnManager.handleCardPlay(card);
       }
     });
 
     // Field card selection (for matching) - handled below with deck selection
 
     // Turn events
-    this.turnManager.on('turnEnd', () => {
-      this.hud.updateTurn(this.turnManager.getCurrentTurn());
+    turnManager.on('turnEnd', () => {
+      this.hud.updateTurn(turnManager.getCurrentTurn());
       this.field.clearAllHighlights();
     });
 
-    this.turnManager.on('scoreUpdate', (scores) => {
+    turnManager.on('scoreUpdate', (scores) => {
       this.hud.updateScores(scores);
     });
 
     // Collected counts update
-    this.turnManager.on('collectedUpdate', (data: {
+    turnManager.on('collectedUpdate', (data: {
       player: { kwang: number; animal: number; ribbon: number; pi: number };
       opponent: { kwang: number; animal: number; ribbon: number; pi: number };
       playerCards: { kwang: Card[]; animal: Card[]; ribbon: Card[]; pi: Card[] };
@@ -307,7 +305,7 @@ export class GameScene extends Scene {
       this.opponentCollectedDisplay.updateFromCards(data.opponentCards);
     });
 
-    this.turnManager.on('gameEnd', (result) => {
+    turnManager.on('gameEnd', (result) => {
       this.hud.stopTimer();
       console.log('Game ended:', result);
       this.changeScene('result', result);
@@ -315,24 +313,24 @@ export class GameScene extends Scene {
 
     // Turn timeout handling
     this.hud.on('turnTimeout', (turn: 'player' | 'opponent') => {
-      if (turn === 'player' && this.turnManager.isPlayerTurn()) {
+      if (turn === 'player' && turnManager.isPlayerTurn()) {
         this.hud.showTimeoutNotification();
-        this.turnManager.forceSkipTurn();
+        turnManager.forceSkipTurn();
       }
     });
 
     // Stop timer during card resolution
-    this.turnManager.on('resolving', () => {
+    turnManager.on('resolving', () => {
       this.hud.stopTimer();
     });
 
     // Resume timer when turn starts
-    this.turnManager.on('turnStart', () => {
+    turnManager.on('turnStart', () => {
       this.hud.startTimer();
     });
 
     // Deck card selection (2-match from deck)
-    this.turnManager.on('requireDeckSelection', (data: { card: Card; matchingCards: Card[] }) => {
+    turnManager.on('requireDeckSelection', (data: { card: Card; matchingCards: Card[] }) => {
       this.hud.showNotification('뒷패로 바닥패를 선택하세요');
       data.matchingCards.forEach(card => {
         card.setMatchHighlight(true);
@@ -341,16 +339,16 @@ export class GameScene extends Scene {
 
     // Field card selected for deck matching
     this.field.on('cardSelected', (card) => {
-      if (this.turnManager.isWaitingForDeckSelection()) {
+      if (turnManager.isWaitingForDeckSelection()) {
         this.field.clearAllHighlights();
-        this.turnManager.handleDeckCardSelection(card);
-      } else if (this.turnManager.isWaitingForFieldSelection()) {
-        this.turnManager.handleFieldCardSelection(card);
+        turnManager.handleDeckCardSelection(card);
+      } else if (turnManager.isWaitingForFieldSelection()) {
+        turnManager.handleFieldCardSelection(card);
       }
     });
 
     // Go/Stop decision
-    this.turnManager.on('goStopDecision', (data: { player: 'player' | 'opponent'; score: number; goCount: number }) => {
+    turnManager.on('goStopDecision', (data: { player: 'player' | 'opponent'; score: number; goCount: number }) => {
       if (data.player === 'player') {
         this.showGoStopPrompt(data.score, data.goCount);
       } else {
@@ -358,28 +356,28 @@ export class GameScene extends Scene {
       }
     });
 
-    this.turnManager.on('goDeclared', (data: { player: 'player' | 'opponent'; goCount: number }) => {
+    turnManager.on('goDeclared', (data: { player: 'player' | 'opponent'; goCount: number }) => {
       const who = data.player === 'player' ? '내가' : '상대가';
       this.hud.showNotification(`${who} 고! (${data.goCount}회)`);
     });
 
-    this.turnManager.on('stopDeclared', (player: 'player' | 'opponent') => {
+    turnManager.on('stopDeclared', (player: 'player' | 'opponent') => {
       const who = player === 'player' ? '내가' : '상대가';
       this.hud.showNotification(`${who} 스톱!`);
     });
 
     // Special events
-    this.turnManager.on('shake', (data: { player: 'player' | 'opponent'; month: number }) => {
+    turnManager.on('shake', (data: { player: 'player' | 'opponent'; month: number }) => {
       const who = data.player === 'player' ? '나' : '상대';
       this.hud.showNotification(`${who} 흔들기! (${data.month}월)`);
     });
 
-    this.turnManager.on('bomb', (data: { player: 'player' | 'opponent'; month: number }) => {
+    turnManager.on('bomb', (data: { player: 'player' | 'opponent'; month: number }) => {
       const who = data.player === 'player' ? '나' : '상대';
       this.hud.showNotification(`${who} 폭탄! (${data.month}월)`);
     });
 
-    this.turnManager.on('ppuk', (player: 'player' | 'opponent') => {
+    turnManager.on('ppuk', (player: 'player' | 'opponent') => {
       const who = player === 'player' ? '나' : '상대';
       this.hud.showNotification(`${who} 뻑!`);
     });
@@ -399,6 +397,11 @@ export class GameScene extends Scene {
     if (this.goStopContainer) {
       this.uiLayer.removeChild(this.goStopContainer);
       this.goStopContainer.destroy();
+    }
+
+    const turnManager = this.turnManager;
+    if (!turnManager) {
+      return;
     }
 
     this.goStopContainer = new Container();
@@ -452,7 +455,7 @@ export class GameScene extends Scene {
     goButton.cursor = 'pointer';
     goButton.on('pointerdown', () => {
       this.hideGoStopPrompt();
-      this.turnManager.declareGo();
+      turnManager.declareGo();
     });
     this.goStopContainer.addChild(goButton);
 
@@ -477,7 +480,7 @@ export class GameScene extends Scene {
     stopButton.cursor = 'pointer';
     stopButton.on('pointerdown', () => {
       this.hideGoStopPrompt();
-      this.turnManager.declareStop();
+      turnManager.declareStop();
     });
     this.goStopContainer.addChild(stopButton);
 
@@ -585,7 +588,6 @@ export class GameScene extends Scene {
     if (!this.gameSync) return;
 
     this.gameSync.onGameStateChange((state) => {
-      this.remoteGameState = state;
       this.applyRemoteState(state);
     });
   }
