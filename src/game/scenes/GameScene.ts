@@ -718,8 +718,11 @@ export class GameScene extends Scene {
         return;
       }
 
-      // 턴 체크 - 내 턴이 아니면 알림 표시
-      if (!this.isMyTurn()) {
+      // 턴 체크 - 내 턴이 아니면 알림 표시 (게스트만 체크)
+      const myTurn = this.isMyTurn();
+      console.log('[Guest] Turn check result:', myTurn);
+
+      if (!myTurn) {
         console.warn('[Guest] Not my turn, showing notification');
         if (this.hud) {
           this.hud.showNotification('상대방의 차례입니다.');
@@ -1136,7 +1139,13 @@ export class GameScene extends Scene {
   }
 
   private isMyTurn(): boolean {
-    if (!this.lastReceivedGameState || !this.multiplayerPlayers) return false;
+    if (!this.lastReceivedGameState || !this.multiplayerPlayers) {
+      console.warn('[isMyTurn] Missing state or players:', {
+        hasState: !!this.lastReceivedGameState,
+        hasPlayers: !!this.multiplayerPlayers,
+      });
+      return false;
+    }
 
     const currentUserId = getCurrentUserId();
     const isLocalHost = currentUserId === this.multiplayerPlayers.host.id;
@@ -1145,15 +1154,20 @@ export class GameScene extends Scene {
     // 호스트: state.currentTurn이 'player'면 내 턴
     // 게스트: state.currentTurn이 'opponent'면 내 턴 (호스트의 opponent = 게스트)
     const myTurn = isLocalHost ? state.currentTurn === 'player' : state.currentTurn === 'opponent';
+    const phaseOK = state.phase !== 'waiting' && state.phase !== 'dealing';
 
-    console.log('[isMyTurn]', {
+    console.log('[isMyTurn] Full check:', {
+      currentUserId,
+      'host.id': this.multiplayerPlayers.host.id,
       isLocalHost,
       'state.currentTurn': state.currentTurn,
-      myTurn,
       'state.phase': state.phase,
+      myTurn,
+      phaseOK,
+      finalResult: myTurn && phaseOK,
     });
 
-    return myTurn && state.phase !== 'waiting' && state.phase !== 'dealing';
+    return myTurn && phaseOK;
   }
 
   private applyRemoteState(state: GameState): void {
