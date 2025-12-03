@@ -275,6 +275,51 @@ export class TurnManager extends EventEmitter {
     this.playCard(this.selectedHandCard, 'player');
   }
 
+  // 멀티플레이어: 상대방(게스트)의 카드 플레이 처리 (호스트에서 호출)
+  handleOpponentCardPlay(card: Card): void {
+    if (this.phase !== 'opponentTurn') return;
+
+    this.selectedHandCard = card;
+    const matchingCards = this.field.getMatchingCards(card.getMonth());
+
+    if (matchingCards.length === 0) {
+      // No match - card goes to field
+      this.playCard(card, 'opponent');
+    } else if (matchingCards.length === 1) {
+      // One match - auto collect
+      this.pendingFieldCards = matchingCards;
+      this.playCard(card, 'opponent');
+    } else if (matchingCards.length === 3) {
+      // Three matches - 뻑(Ppuk): card goes to field, wait for deck draw
+      this.pendingFieldCards = [];
+      this.playCard(card, 'opponent');
+      this.emit('ppukPending', card.getMonth());
+    } else {
+      // Two matches - opponent must choose (호스트에서 선택 요청 이벤트 발생)
+      this.phase = 'selecting';
+      this.pendingFieldCards = matchingCards;
+      this.emit('requireOpponentFieldSelection', matchingCards);
+    }
+  }
+
+  // 멀티플레이어: 상대방(게스트)의 필드 카드 선택 처리
+  handleOpponentFieldSelection(fieldCard: Card): void {
+    if (this.phase !== 'selecting' || !this.selectedHandCard) return;
+
+    this.pendingFieldCards = [fieldCard];
+    this.playCard(this.selectedHandCard, 'opponent');
+  }
+
+  // 멀티플레이어: 상대방의 뒷패 카드 선택 처리
+  handleOpponentDeckCardSelection(fieldCard: Card): void {
+    if (this.phase !== 'deckSelecting' || !this.pendingDeckCard) return;
+
+    this.collectCards('opponent', [this.pendingDeckCard, fieldCard]);
+    this.pendingDeckCard = null;
+    this.pendingFieldCards = [];
+    this.finishTurnAfterDraw();
+  }
+
   private async playCard(card: Card, player: 'player' | 'opponent'): Promise<void> {
     this.phase = 'resolving';
     this.emit('resolving');

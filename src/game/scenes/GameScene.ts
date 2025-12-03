@@ -233,7 +233,9 @@ export class GameScene extends Scene {
 
   private async initializeMultiplayerFlow(): Promise<void> {
     if (!this.roomId) {
-      await this.initializeLocalGameSystems(false);
+      // roomId가 없으면 로비로 돌아감
+      console.error('No roomId for multiplayer flow');
+      this.changeScene('lobby');
       return;
     }
 
@@ -241,14 +243,18 @@ export class GameScene extends Scene {
     const roomRef = ref(db, `${FIREBASE_PATHS.ROOMS}/${this.roomId}`);
     const snapshot = await get(roomRef);
     if (!snapshot.exists()) {
-      await this.initializeLocalGameSystems(false);
+      // 방이 존재하지 않으면 로비로 돌아감
+      console.error('Room does not exist');
+      this.changeScene('lobby');
       return;
     }
 
     const room = snapshot.val() as RoomData;
     const currentUserId = getCurrentUserId();
     if (!currentUserId) {
-      await this.initializeLocalGameSystems(false);
+      // 로그인하지 않은 경우 로비로 돌아감
+      console.error('User not authenticated');
+      this.changeScene('lobby');
       return;
     }
 
@@ -333,9 +339,32 @@ export class GameScene extends Scene {
       this.opponentCollectedDisplay.updateFromCards(data.opponentCards);
     });
 
-    turnManager.on('gameEnd', (result) => {
+    turnManager.on('gameEnd', async (result) => {
       this.hud.stopTimer();
       console.log('Game ended:', result);
+
+      // 멀티플레이어 게임 종료 시 Firebase 상태 업데이트
+      if (this.gameMode === 'multiplayer' && this.gameSync && this.multiplayerPlayers) {
+        try {
+          // 승자 ID 결정 (host가 항상 player)
+          let winnerId: string;
+          if (result.winner === 'player') {
+            winnerId = this.multiplayerPlayers.host.id;
+          } else if (result.winner === 'opponent') {
+            winnerId = this.multiplayerPlayers.guest?.id ?? 'unknown';
+          } else {
+            winnerId = 'draw'; // 무승부
+          }
+
+          await this.gameSync.endGame(winnerId, {
+            player: result.playerScore?.total ?? 0,
+            opponent: result.opponentScore?.total ?? 0,
+          });
+        } catch (error) {
+          console.error('Failed to update game end status:', error);
+        }
+      }
+
       this.changeScene('result', result);
     });
 
@@ -625,6 +654,31 @@ export class GameScene extends Scene {
       }
       this.applyRemoteState(state);
     });
+
+    // 게스트용 이벤트 핸들러 설정 (호스트에게 액션 전달)
+    this.setupGuestEventHandlers();
+  }
+
+  // 게스트가 카드를 선택하면 호스트에게 전달
+  private setupGuestEventHandlers(): void {
+    if (!this.gameSync) return;
+
+    // 플레이어(게스트) 카드 선택 - 호스트에게 전달
+    this.playerHand.on('cardSelected', (card: Card) => {
+      if (!this.gameSync) return;
+
+      // 호스트에게 카드 플레이 액션 전달
+      this.gameSync.playCard(card.cardData.id, {
+        targetMonth: card.getMonth(),
+      });
+    });
+
+    // 필드 카드 선택 (2장 매칭 시) - 호스트에게 전달
+    this.field.on('cardSelected', (card: Card) => {
+      if (!this.gameSync) return;
+
+      this.gameSync.selectFieldCard(card.cardData.id);
+    });
   }
 
   private attachRoomListener(): void {
@@ -705,6 +759,9 @@ export class GameScene extends Scene {
   private async startHostMultiplayerMatch(guestId: string, guestName: string): Promise<void> {
     if (this.hasInitializedMultiplayerSystems) return;
 
+    // 레이스 컨디션 방지: 플래그를 먼저 설정하여 중복 호출 방지
+    this.hasInitializedMultiplayerSystems = true;
+
     if (!this.multiplayerPlayers) {
       const currentUserId = getCurrentUserId() ?? 'host';
       this.multiplayerPlayers = {
@@ -718,10 +775,60 @@ export class GameScene extends Scene {
     };
 
     await this.initializeLocalGameSystems(false);
+
+    // 호스트: 게스트의 액션을 수신하도록 리스너 설정
+    this.setupHostOpponentActionListener();
+
+    // 게임 시작 시 즉시 상태를 한 번 동기화하여 게스트에게 초기 상태 전달
+    await this.broadcastGameState();
+
     this.startHostSyncLoop();
-    this.hasInitializedMultiplayerSystems = true;
     this.hideWaitingOverlay();
     this.destroyJoinRequestPrompt();
+  }
+
+  // 호스트: 게스트의 액션을 수신하여 처리
+  private setupHostOpponentActionListener(): void {
+    if (!this.gameSync || !this.turnManager) return;
+
+    this.gameSync.onOpponentAction((action) => {
+      if (!this.turnManager) return;
+
+      // 상대방(게스트) 턴일 때만 액션 처리
+      if (this.turnManager.getCurrentTurn() !== 'opponent') {
+        console.warn('Received opponent action but it is not opponent turn');
+        return;
+      }
+
+      switch (action.type) {
+        case 'PLAY_CARD': {
+          // 상대방이 플레이한 카드 찾기
+          const card = this.opponentHand.getCards().find(c => c.cardData.id === action.cardId);
+          if (card) {
+            this.turnManager.handleOpponentCardPlay(card);
+          } else {
+            console.warn('Card not found in opponent hand:', action.cardId);
+          }
+          break;
+        }
+        case 'SELECT_FIELD_CARD': {
+          // 필드 카드 선택 (2장 매칭 시)
+          const fieldCard = this.field.getAllCards().find(c => c.cardData.id === action.targetCardId);
+          if (fieldCard) {
+            this.turnManager.handleOpponentFieldSelection(fieldCard);
+          }
+          break;
+        }
+        case 'DECLARE_GO': {
+          this.turnManager.declareGo();
+          break;
+        }
+        case 'DECLARE_STOP': {
+          this.turnManager.declareStop();
+          break;
+        }
+      }
+    });
   }
 
   private async respondToJoinRequest(request: RoomJoinRequest, accept: boolean): Promise<void> {
