@@ -247,8 +247,13 @@ export class Card extends Sprite {
 
   // 카드 매칭 애니메이션 (바닥패와 합쳐지는 효과)
   async matchWithCard(targetCard: Card): Promise<void> {
-    const targetPos = targetCard.getGlobalPosition();
-    const myPos = this.getGlobalPosition();
+    if (!this.parent) return;
+
+    // Get target card's global position
+    const targetGlobalPos = targetCard.getGlobalPosition();
+
+    // Convert to this card's parent local coordinates
+    const targetLocalPos = this.parent.toLocal(targetGlobalPos);
 
     // Increase z-index to show card on top during match
     const originalZIndex = this.zIndex;
@@ -256,8 +261,8 @@ export class Card extends Sprite {
 
     // Animate to exact target position for clear overlap effect
     await gsap.to(this, {
-      x: this.x + (targetPos.x - myPos.x),
-      y: this.y + (targetPos.y - myPos.y),
+      x: targetLocalPos.x,
+      y: targetLocalPos.y,
       scale: 1.05,
       rotation: 0,
       duration: ANIMATION_DURATION.CARD_MOVE * 0.8,
