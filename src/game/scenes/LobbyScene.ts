@@ -496,6 +496,7 @@ export class LobbyScene extends Scene {
     const currentUserId = getCurrentUserId();
     if (!currentUserId) return;
 
+    // 방이 삭제된 경우
     if (!room) {
       this.setStatus('게임방이 닫혔습니다.', true);
       this.clearPendingJoinState();
@@ -503,25 +504,26 @@ export class LobbyScene extends Scene {
       return;
     }
 
+    // 호스트가 수락하여 게임이 시작된 경우 → 게임 씬으로 이동
     if (room.status === 'playing' && room.guest === currentUserId) {
       this.setStatus('게임방에 입장합니다...', false);
       this.changeScene('game', { mode: 'multiplayer', roomId });
       return;
     }
 
+    // 호스트가 거절한 경우: joinRequest가 null이고, 내가 guest가 아닌 경우
     const request = room.joinRequest;
-    if (!request || request.playerId !== currentUserId) {
+    const wasRejected = !request && room.guest !== currentUserId;
+
+    if (wasRejected) {
       this.setStatus('방 주인이 요청을 거절했습니다.', true);
       this.clearPendingJoinState();
       this.updateJoinButtonState();
       return;
     }
 
-    if (room.status === 'waiting') {
-      this.setStatus('방 주인이 요청을 거절했습니다.', true);
-      this.clearPendingJoinState();
-      this.updateJoinButtonState();
-    }
+    // 아직 대기 중인 경우 (joinRequest가 존재하고 내 요청인 경우)
+    // → 아무것도 하지 않고 계속 대기
   }
 
   private clearPendingJoinState(): void {
