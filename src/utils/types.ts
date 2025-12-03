@@ -23,7 +23,7 @@ export interface PlayerState {
   goCount: number;
 }
 
-export type RoomStatus = 'waiting' | 'challenge_pending' | 'playing' | 'finished';
+export type RoomStatus = 'waiting' | 'playing' | 'finished';
 
 export interface RoomJoinRequest {
   playerId: string;

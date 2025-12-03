@@ -52,7 +52,7 @@ export class Matchmaking {
       const roomsRecord = snapshot.val() as Record<string, RoomData> | null;
       const rooms = roomsRecord ? Object.values(roomsRecord).filter(Boolean) : [];
       const activeRooms = rooms
-        .filter(room => !room?.isPrivate && (room.status === 'waiting' || room.status === 'challenge_pending'))
+        .filter(room => !room?.isPrivate && room.status === 'waiting')
         .sort((a, b) => b.createdAt - a.createdAt);
 
       callback(activeRooms);
@@ -166,15 +166,14 @@ export class Matchmaking {
       throw new Error('다른 도전자가 이미 대기 중입니다.');
     }
 
-    await update(roomRef, {
-      joinRequest: {
-        playerId: userId,
-        playerName: this.getDisplayName(),
-        requestedAt: Date.now(),
-      },
-      status: 'challenge_pending',
-      lastActivityAt: Date.now(),
-    });
+      await update(roomRef, {
+        joinRequest: {
+          playerId: userId,
+          playerName: this.getDisplayName(),
+          requestedAt: Date.now(),
+        },
+        lastActivityAt: Date.now(),
+      });
   }
 
   async cancelJoinRequest(roomId: string): Promise<void> {

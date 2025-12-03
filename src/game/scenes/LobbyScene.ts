@@ -295,11 +295,11 @@ export class LobbyScene extends Scene {
   }
 
   private describeRoomStatus(room: RoomData): string {
-    if (room.status === 'challenge_pending') {
+    if (room.joinRequest) {
       return '수락 대기 중';
     }
     if (room.status === 'waiting') {
-      return '대기 중';
+      return '도전자 대기 중';
     }
     if (room.status === 'playing') {
       return '게임 중';
