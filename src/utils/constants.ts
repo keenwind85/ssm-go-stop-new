@@ -107,6 +107,11 @@ export const FIREBASE_PATHS = {
   COIN_TRANSACTIONS: 'coinTransactions',
 } as const;
 
+// 방 관련 상수
+export const ROOM_CONSTANTS = {
+  STALE_ROOM_TIMEOUT: 30 * 60 * 1000,  // 30분 (밀리초) - 이 시간 이후 방은 오래된 것으로 간주
+} as const;
+
 // 코인 관련 상수
 export const COIN_CONSTANTS = {
   SIGNUP_BONUS: 100,              // 가입 시 지급 코인

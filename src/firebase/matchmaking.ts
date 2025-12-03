@@ -17,7 +17,7 @@ import { getRealtimeDatabase } from './config';
 import { getCurrentUser, getCurrentUserId } from './auth';
 import { canJoinGame } from './coinService';
 import { RoomData } from '@utils/types';
-import { FIREBASE_PATHS, COIN_CONSTANTS } from '@utils/constants';
+import { FIREBASE_PATHS, COIN_CONSTANTS, ROOM_CONSTANTS } from '@utils/constants';
 import { generateId } from '@utils/helpers';
 
 export class Matchmaking {
@@ -44,7 +44,7 @@ export class Matchmaking {
 
   watchAvailableRooms(callback: (rooms: RoomData[]) => void): () => void {
     const roomsRef = ref(this.database, FIREBASE_PATHS.ROOMS);
-    const unsubscribe = onValue(roomsRef, (snapshot: DataSnapshot) => {
+    const unsubscribe = onValue(roomsRef, async (snapshot: DataSnapshot) => {
       if (!snapshot.exists()) {
         callback([]);
         return;
@@ -52,15 +52,71 @@ export class Matchmaking {
 
       const roomsRecord = snapshot.val() as Record<string, RoomData> | null;
       const rooms = roomsRecord ? Object.values(roomsRecord).filter(Boolean) : [];
+      const now = Date.now();
+
+      // Filter active rooms (not private, waiting status, and not stale)
       const activeRooms = rooms
-        .filter(room => !room?.isPrivate && room.status === 'waiting')
+        .filter(room => {
+          if (!room || room.isPrivate || room.status !== 'waiting') {
+            return false;
+          }
+          // Check if room is stale (no activity for STALE_ROOM_TIMEOUT)
+          const lastActivity = room.lastActivityAt || room.createdAt;
+          const isStale = now - lastActivity > ROOM_CONSTANTS.STALE_ROOM_TIMEOUT;
+          return !isStale;
+        })
         .sort((a, b) => b.createdAt - a.createdAt);
+
+      // Clean up stale rooms in the background
+      this.cleanupStaleRooms(roomsRecord);
 
       callback(activeRooms);
     });
 
     this.unsubscribers.push(unsubscribe);
     return unsubscribe;
+  }
+
+  /**
+   * 오래된 방을 정리합니다
+   * - waiting 상태: 30분 이상 활동 없는 방
+   * - finished 상태: 모든 finished 방 (게임 종료 후 정리)
+   */
+  private async cleanupStaleRooms(roomsRecord: Record<string, RoomData> | null): Promise<void> {
+    if (!roomsRecord) return;
+
+    const now = Date.now();
+    const staleRoomIds: string[] = [];
+
+    for (const [roomId, room] of Object.entries(roomsRecord)) {
+      if (!room) continue;
+
+      // Clean up finished rooms immediately
+      if (room.status === 'finished') {
+        staleRoomIds.push(roomId);
+        continue;
+      }
+
+      // Clean up stale waiting rooms (no activity for STALE_ROOM_TIMEOUT)
+      if (room.status === 'waiting') {
+        const lastActivity = room.lastActivityAt || room.createdAt;
+        const isStale = now - lastActivity > ROOM_CONSTANTS.STALE_ROOM_TIMEOUT;
+        if (isStale) {
+          staleRoomIds.push(roomId);
+        }
+      }
+    }
+
+    // Delete stale rooms
+    for (const roomId of staleRoomIds) {
+      try {
+        const roomRef = ref(this.database, `${FIREBASE_PATHS.ROOMS}/${roomId}`);
+        await remove(roomRef);
+        console.log(`[Matchmaking] Cleaned up stale room: ${roomId}`);
+      } catch (error) {
+        console.warn(`[Matchmaking] Failed to cleanup stale room ${roomId}:`, error);
+      }
+    }
   }
 
   async createRoom(roomName?: string): Promise<string> {
