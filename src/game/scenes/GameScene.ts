@@ -435,10 +435,10 @@ export class GameScene extends Scene {
     });
 
     // Field card selected for deck matching
-    this.field.on('cardSelected', (card) => {
+    this.field.on('cardSelected', async (card) => {
       if (turnManager.isWaitingForDeckSelection()) {
         this.field.clearAllHighlights();
-        turnManager.handleDeckCardSelection(card);
+        await turnManager.handleDeckCardSelection(card);
       } else if (turnManager.isWaitingForFieldSelection()) {
         turnManager.handleFieldCardSelection(card);
       }
@@ -903,7 +903,7 @@ export class GameScene extends Scene {
 
     console.log('[Host] Setting up opponent action listener');
 
-    this.gameSync.onOpponentAction((action) => {
+    this.gameSync.onOpponentAction(async (action) => {
       console.log('[Host] Received opponent action:', action.type, action);
       if (!this.turnManager) {
         console.warn('[Host] turnManager is null');
@@ -945,7 +945,7 @@ export class GameScene extends Scene {
               this.turnManager.handleOpponentFieldSelection(fieldCard);
             } else if (phase === 'deckSelecting') {
               console.log('[Host] Found field card, calling handleOpponentDeckCardSelection');
-              this.turnManager.handleOpponentDeckCardSelection(fieldCard);
+              await this.turnManager.handleOpponentDeckCardSelection(fieldCard);
             } else {
               console.warn('[Host] Field card selection received but phase is not selecting:', phase);
             }

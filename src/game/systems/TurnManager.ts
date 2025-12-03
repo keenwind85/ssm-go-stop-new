@@ -6,6 +6,7 @@ import { Card } from '@game/objects/Card';
 import { ScoreCalculator } from './ScoreCalculator';
 import { GamePhase, ScoreBreakdown } from '@utils/types';
 import { delay } from '@utils/helpers';
+import { POSITIONS } from '@utils/constants';
 
 interface TurnManagerConfig {
   deck: Deck;
@@ -172,7 +173,7 @@ export class TurnManager extends EventEmitter {
     cards.forEach(card => hand.removeCard(card));
 
     // 획득
-    this.collectCards(player, allCards);
+    await this.collectCards(player, allCards);
 
     await delay(500);
   }
@@ -311,13 +312,15 @@ export class TurnManager extends EventEmitter {
   }
 
   // 멀티플레이어: 상대방의 뒷패 카드 선택 처리
-  handleOpponentDeckCardSelection(fieldCard: Card): void {
+  async handleOpponentDeckCardSelection(fieldCard: Card): Promise<void> {
     if (this.phase !== 'deckSelecting' || !this.pendingDeckCard) return;
 
-    this.collectCards('opponent', [this.pendingDeckCard, fieldCard]);
+    // Show matching animation then collect
+    await this.pendingDeckCard.matchWithCard(fieldCard);
+    await this.collectCards('opponent', [this.pendingDeckCard, fieldCard]);
     this.pendingDeckCard = null;
     this.pendingFieldCards = [];
-    this.finishTurnAfterDraw();
+    await this.finishTurnAfterDraw();
   }
 
   private async playCard(card: Card, player: 'player' | 'opponent'): Promise<void> {
@@ -345,8 +348,8 @@ export class TurnManager extends EventEmitter {
       if (matchingCards.length > 0) {
         await card.matchWithCard(matchingCards[0]);
       }
-      // Collect matching cards
-      this.collectCards(player, [card, ...matchingCards]);
+      // Collect matching cards with animation
+      await this.collectCards(player, [card, ...matchingCards]);
     }
 
     // Draw from deck
@@ -376,8 +379,9 @@ export class TurnManager extends EventEmitter {
       // No match - add to field
       this.field.addCard(drawnCard);
     } else if (matchingCards.length === 1) {
-      // One match - collect
-      this.collectCards(player, [drawnCard, matchingCards[0]]);
+      // One match - show matching animation then collect
+      await drawnCard.matchWithCard(matchingCards[0]);
+      await this.collectCards(player, [drawnCard, matchingCards[0]]);
     } else if (matchingCards.length >= 3) {
       // Three or more - take all (뻑)
       if (player === 'player') {
@@ -385,7 +389,9 @@ export class TurnManager extends EventEmitter {
       } else {
         this.opponentHasPpuk = true;
       }
-      this.collectCards(player, [drawnCard, ...matchingCards]);
+      // Show matching animation with first card then collect all
+      await drawnCard.matchWithCard(matchingCards[0]);
+      await this.collectCards(player, [drawnCard, ...matchingCards]);
       this.emit('ppuk', player);
     } else {
       // Two matches - need selection
@@ -398,24 +404,28 @@ export class TurnManager extends EventEmitter {
         return true; // 선택을 기다림
       } else {
         // AI: 첫 번째 카드 선택
-        this.collectCards(player, [drawnCard, matchingCards[0]]);
+        await drawnCard.matchWithCard(matchingCards[0]);
+        await this.collectCards(player, [drawnCard, matchingCards[0]]);
       }
     }
     return false;
   }
 
   // 뒷패 카드로 바닥패 2장 중 선택
-  handleDeckCardSelection(fieldCard: Card): void {
+  async handleDeckCardSelection(fieldCard: Card): Promise<void> {
     if (this.phase !== 'deckSelecting' || !this.pendingDeckCard) return;
 
     const player = this.currentTurn;
-    this.collectCards(player, [this.pendingDeckCard, fieldCard]);
+
+    // Show matching animation then collect
+    await this.pendingDeckCard.matchWithCard(fieldCard);
+    await this.collectCards(player, [this.pendingDeckCard, fieldCard]);
 
     this.pendingDeckCard = null;
     this.pendingFieldCards = [];
 
     // 턴 종료 진행
-    this.finishTurnAfterDraw();
+    await this.finishTurnAfterDraw();
   }
 
   private async finishTurnAfterDraw(): Promise<void> {
@@ -537,15 +547,24 @@ export class TurnManager extends EventEmitter {
     return this.phase === 'goStop';
   }
 
-  private collectCards(player: 'player' | 'opponent', cards: Card[]): void {
+  private async collectCards(player: 'player' | 'opponent', cards: Card[]): Promise<void> {
     const collected = player === 'player' ? this.playerCollected : this.opponentCollected;
+    const targetPos = player === 'player' ? POSITIONS.PLAYER_COLLECTED : POSITIONS.OPPONENT_COLLECTED;
 
-    cards.forEach(card => {
+    // Animate all cards to collected position in parallel
+    const animationPromises = cards.map(async card => {
       this.field.removeCard(card);
       collected.push(card);
-      // Hide collected cards (they're counted in HUD)
+
+      // Animate card to collected position
+      await card.moveTo(targetPos.x, targetPos.y);
+
+      // Hide collected cards after animation (they're displayed in CollectedCardsDisplay)
       card.visible = false;
     });
+
+    // Wait for all animations to complete
+    await Promise.all(animationPromises);
 
     // Calculate and update scores
     this.updateScores();

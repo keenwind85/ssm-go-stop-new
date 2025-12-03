@@ -250,29 +250,34 @@ export class Card extends Sprite {
     const targetPos = targetCard.getGlobalPosition();
     const myPos = this.getGlobalPosition();
 
-    // Calculate offset to stack slightly
-    const offsetX = 10;
-    const offsetY = 10;
+    // Increase z-index to show card on top during match
+    const originalZIndex = this.zIndex;
+    this.zIndex = 1000;
 
-    // Animate to target position with overlap
+    // Animate to exact target position for clear overlap effect
     await gsap.to(this, {
-      x: this.x + (targetPos.x - myPos.x) + offsetX,
-      y: this.y + (targetPos.y - myPos.y) + offsetY,
-      rotation: 0.05,
-      duration: ANIMATION_DURATION.CARD_MOVE,
+      x: this.x + (targetPos.x - myPos.x),
+      y: this.y + (targetPos.y - myPos.y),
+      scale: 1.05,
+      rotation: 0,
+      duration: ANIMATION_DURATION.CARD_MOVE * 0.8,
       ease: 'power2.out',
     });
 
-    // Brief pause to show the match
-    await new Promise(resolve => setTimeout(resolve, 150));
+    // Hold the overlap state longer for realistic matching effect
+    await new Promise(resolve => setTimeout(resolve, 300));
 
-    // Flash effect
-    gsap.to(this, {
-      alpha: 0.7,
-      duration: 0.1,
+    // Scale back and flash effect
+    await gsap.to(this, {
+      scale: 1.0,
+      alpha: 0.8,
+      duration: 0.15,
       yoyo: true,
       repeat: 1,
     });
+
+    // Restore original z-index
+    this.zIndex = originalZIndex;
   }
 
   getOriginalY(): number {
