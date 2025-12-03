@@ -48,10 +48,18 @@ export class GameSync {
       timestamp: Date.now(),
     };
 
-    console.log('[GameSync] Sending action to Firebase:', fullAction);
+    // Remove undefined fields - Firebase doesn't accept undefined values
+    const cleanAction = Object.entries(fullAction).reduce((acc, [key, value]) => {
+      if (value !== undefined) {
+        acc[key] = value;
+      }
+      return acc;
+    }, {} as Record<string, unknown>);
+
+    console.log('[GameSync] Sending action to Firebase:', cleanAction);
     try {
       await update(this.gameStateRef, {
-        lastAction: fullAction,
+        lastAction: cleanAction,
       });
       console.log('[GameSync] Action sent successfully');
     } catch (error) {
