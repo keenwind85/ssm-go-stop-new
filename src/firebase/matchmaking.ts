@@ -14,7 +14,7 @@ import {
   type DatabaseReference,
 } from 'firebase/database';
 import { getRealtimeDatabase } from './config';
-import { getCurrentUserId } from './auth';
+import { getCurrentUser, getCurrentUserId } from './auth';
 import { RoomData } from '@utils/types';
 import { FIREBASE_PATHS } from '@utils/constants';
 import { generateId } from '@utils/helpers';
@@ -41,18 +41,45 @@ export class Matchmaking {
     return await this.createRoom();
   }
 
-  async createRoom(): Promise<string> {
+  watchAvailableRooms(callback: (rooms: RoomData[]) => void): () => void {
+    const roomsRef = ref(this.database, FIREBASE_PATHS.ROOMS);
+    const unsubscribe = onValue(roomsRef, (snapshot: DataSnapshot) => {
+      if (!snapshot.exists()) {
+        callback([]);
+        return;
+      }
+
+      const roomsRecord = snapshot.val() as Record<string, RoomData> | null;
+      const rooms = roomsRecord ? Object.values(roomsRecord).filter(Boolean) : [];
+      const activeRooms = rooms
+        .filter(room => !room?.isPrivate && (room.status === 'waiting' || room.status === 'challenge_pending'))
+        .sort((a, b) => b.createdAt - a.createdAt);
+
+      callback(activeRooms);
+    });
+
+    this.unsubscribers.push(unsubscribe);
+    return unsubscribe;
+  }
+
+  async createRoom(roomName?: string): Promise<string> {
     const userId = getCurrentUserId();
     if (!userId) throw new Error('User not authenticated');
 
     const roomId = generateId(8);
     const roomRef = ref(this.database, `${FIREBASE_PATHS.ROOMS}/${roomId}`);
+    const displayName = this.getDisplayName();
+    const trimmedName = roomName?.trim();
 
     const roomData: RoomData = {
       id: roomId,
+      name: trimmedName && trimmedName.length > 0 ? trimmedName : `${displayName}의 게임방`,
       host: userId,
+      hostName: displayName,
       status: 'waiting',
       createdAt: Date.now(),
+      lastActivityAt: Date.now(),
+      joinRequest: null,
     };
 
     await set(roomRef, roomData);
@@ -63,6 +90,10 @@ export class Matchmaking {
 
     this.currentRoomId = roomId;
     return roomId;
+  }
+
+  async createNamedRoom(roomName: string): Promise<string> {
+    return this.createRoom(roomName);
   }
 
   async joinRoom(roomId: string): Promise<void> {
@@ -89,7 +120,10 @@ export class Matchmaking {
     // Update room with guest
     await update(roomRef, {
       guest: userId,
+      guestName: this.getDisplayName(),
       status: 'playing',
+      joinRequest: null,
+      lastActivityAt: Date.now(),
     });
 
     // Set up auto-cleanup on disconnect
@@ -109,6 +143,75 @@ export class Matchmaking {
 
   async joinPrivateRoom(roomId: string): Promise<void> {
     await this.joinRoom(roomId);
+  }
+
+  async requestJoinRoom(roomId: string): Promise<void> {
+    const userId = getCurrentUserId();
+    if (!userId) throw new Error('User not authenticated');
+
+    const roomRef = ref(this.database, `${FIREBASE_PATHS.ROOMS}/${roomId}`);
+    const snapshot = await get(roomRef);
+
+    if (!snapshot.exists()) {
+      throw new Error('게임방을 찾을 수 없습니다.');
+    }
+
+    const roomData = snapshot.val() as RoomData;
+
+    if (roomData.host === userId) {
+      throw new Error('자신의 게임방에는 참여할 수 없습니다.');
+    }
+
+    if (roomData.status !== 'waiting' || roomData.joinRequest) {
+      throw new Error('다른 도전자가 이미 대기 중입니다.');
+    }
+
+    await update(roomRef, {
+      joinRequest: {
+        playerId: userId,
+        playerName: this.getDisplayName(),
+        requestedAt: Date.now(),
+      },
+      status: 'challenge_pending',
+      lastActivityAt: Date.now(),
+    });
+  }
+
+  async cancelJoinRequest(roomId: string): Promise<void> {
+    const userId = getCurrentUserId();
+    if (!userId) throw new Error('User not authenticated');
+
+    const roomRef = ref(this.database, `${FIREBASE_PATHS.ROOMS}/${roomId}`);
+    const snapshot = await get(roomRef);
+
+    if (!snapshot.exists()) {
+      return;
+    }
+
+    const roomData = snapshot.val() as RoomData;
+    if (roomData.joinRequest?.playerId !== userId) {
+      return;
+    }
+
+    await update(roomRef, {
+      joinRequest: null,
+      status: 'waiting',
+      lastActivityAt: Date.now(),
+    });
+  }
+
+  watchRoom(roomId: string, callback: (room: RoomData | null) => void): () => void {
+    const roomRef = ref(this.database, `${FIREBASE_PATHS.ROOMS}/${roomId}`);
+    const unsubscribe = onValue(roomRef, (snapshot: DataSnapshot) => {
+      if (!snapshot.exists()) {
+        callback(null);
+        return;
+      }
+      callback(snapshot.val() as RoomData);
+    });
+
+    this.unsubscribers.push(unsubscribe);
+    return unsubscribe;
   }
 
   onRoomUpdate(callback: (room: RoomData | null) => void): void {
@@ -158,7 +261,9 @@ export class Matchmaking {
         // Guest leaves - update room
         await update(roomRef, {
           guest: null,
+          guestName: null,
           status: 'waiting',
+          joinRequest: null,
         });
       }
     }
@@ -222,5 +327,9 @@ export class Matchmaking {
       /index not defined/i.test(error.message ?? '') &&
       error.message.includes('/rooms')
     );
+  }
+
+  private getDisplayName(): string {
+    return getCurrentUser()?.displayName ?? '플레이어';
   }
 }

@@ -23,6 +23,14 @@ export interface PlayerState {
   goCount: number;
 }
 
+export type RoomStatus = 'waiting' | 'challenge_pending' | 'playing' | 'finished';
+
+export interface RoomJoinRequest {
+  playerId: string;
+  playerName: string;
+  requestedAt: number;
+}
+
 // Game state
 export type GamePhase =
   | 'waiting'
@@ -101,10 +109,16 @@ export interface ScoreBreakdown {
 // Firebase
 export interface RoomData {
   id: string;
+  name?: string;
   host: string;
   guest?: string;
-  status: 'waiting' | 'playing' | 'finished';
+  hostName?: string;
+  guestName?: string;
+  status: RoomStatus;
   createdAt: number;
+  joinRequest?: RoomJoinRequest | null;
+  isPrivate?: boolean;
+  lastActivityAt?: number;
   gameState?: GameState;
 }
 

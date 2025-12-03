@@ -11,9 +11,10 @@ import { TurnManager } from '@game/systems/TurnManager';
 import { ScoreCalculator } from '@game/systems/ScoreCalculator';
 import { getCurrentUserId, getUserProfile } from '@fb/auth';
 import { getRealtimeDatabase } from '@fb/config';
-import { ref, get } from 'firebase/database';
+import { ref, get, onValue, update } from 'firebase/database';
 import { GameSync } from '@fb/gameSync';
-import type { GameState, RoomData, CardData, PlayerState } from '@utils/types';
+import type { GameState, RoomData, CardData, PlayerState, RoomJoinRequest } from '@utils/types';
+import { Button } from '@ui/Button';
 
 interface GameSceneData {
   mode: 'ai' | 'multiplayer';
@@ -48,11 +49,18 @@ export class GameScene extends Scene {
   private turnManager: TurnManager | null = null;
   private scoreCalculator!: ScoreCalculator;
   private gameSync: GameSync | null = null;
+  private multiplayerRole: 'host' | 'guest' | null = null;
   private multiplayerPlayers: {
     host: { id: string; name: string };
     guest?: { id: string; name: string };
   } | null = null;
   private hostSyncInterval: number | null = null;
+  private roomWatcherUnsubscribe: (() => void) | null = null;
+  private waitingOverlay: Container | null = null;
+  private waitingOverlayText: Text | null = null;
+  private joinRequestPrompt: Container | null = null;
+  private activeJoinRequestId: string | null = null;
+  private hasInitializedMultiplayerSystems = false;
 
   constructor(app: Application) {
     super(app);
@@ -99,6 +107,14 @@ export class GameScene extends Scene {
 
   onExit(): void {
     this.app.ticker.remove(this.onTick, this);
+
+    this.roomWatcherUnsubscribe?.();
+    this.roomWatcherUnsubscribe = null;
+    this.destroyWaitingOverlay();
+    this.destroyJoinRequestPrompt();
+    this.multiplayerRole = null;
+    this.activeJoinRequestId = null;
+    this.hasInitializedMultiplayerSystems = false;
 
     if (this.hostSyncInterval) {
       window.clearInterval(this.hostSyncInterval);
@@ -233,6 +249,7 @@ export class GameScene extends Scene {
     }
 
     const role: 'host' | 'guest' = room.host === currentUserId ? 'host' : 'guest';
+    this.multiplayerRole = role;
     this.gameSync = new GameSync(this.roomId);
 
     const hostProfile = await getUserProfile(room.host);
@@ -240,22 +257,29 @@ export class GameScene extends Scene {
     this.multiplayerPlayers = {
       host: {
         id: room.host,
-        name: hostProfile?.name ?? 'Host',
+        name: hostProfile?.name ?? room.hostName ?? 'Host',
       },
       guest: room.guest
         ? {
             id: room.guest,
-            name: guestProfile?.name ?? 'Guest',
+            name: guestProfile?.name ?? room.guestName ?? 'Guest',
           }
         : undefined,
     };
 
     if (role === 'host') {
-      await this.initializeLocalGameSystems(false);
-      this.startHostSyncLoop();
+      if (room.status === 'playing' && room.guest) {
+        const guestName = this.multiplayerPlayers.guest?.name ?? room.guestName ?? 'Guest';
+        await this.startHostMultiplayerMatch(room.guest, guestName);
+      } else {
+        this.hasInitializedMultiplayerSystems = false;
+        this.showWaitingOverlay('도전자를 기다리는 중 입니다...');
+      }
     } else {
       this.setupGuestView();
     }
+
+    this.attachRoomListener();
   }
 
   private setupEventHandlers(): void {
@@ -592,6 +616,258 @@ export class GameScene extends Scene {
     });
   }
 
+  private attachRoomListener(): void {
+    if (!this.roomId) return;
+    const db = getRealtimeDatabase();
+    const roomRef = ref(db, `${FIREBASE_PATHS.ROOMS}/${this.roomId}`);
+    this.roomWatcherUnsubscribe?.();
+    this.roomWatcherUnsubscribe = onValue(roomRef, (snapshot) => {
+      if (!snapshot.exists()) {
+        this.handleRoomClosed();
+        return;
+      }
+
+      const room = snapshot.val() as RoomData;
+      if (this.multiplayerRole === 'host') {
+        this.handleHostRoomUpdate(room);
+      } else if (this.multiplayerRole === 'guest') {
+        this.handleGuestRoomUpdate(room);
+      }
+    });
+  }
+
+  private handleRoomClosed(): void {
+    this.roomWatcherUnsubscribe?.();
+    this.roomWatcherUnsubscribe = null;
+    if (this.hud) {
+      this.hud.showNotification('게임방이 종료되었습니다. 로비로 돌아갑니다.');
+    }
+    this.changeScene('lobby');
+  }
+
+  private handleHostRoomUpdate(room: RoomData): void {
+    if (!this.multiplayerPlayers) return;
+
+    if (room.joinRequest) {
+      if (room.joinRequest.playerId !== this.activeJoinRequestId) {
+        this.activeJoinRequestId = room.joinRequest.playerId;
+        this.showJoinRequestPrompt(room.joinRequest);
+      }
+    } else if (this.activeJoinRequestId) {
+      this.activeJoinRequestId = null;
+      this.destroyJoinRequestPrompt();
+    }
+
+    if (room.status === 'waiting' && !room.joinRequest) {
+      this.hasInitializedMultiplayerSystems = false;
+      this.showWaitingOverlay('도전자를 기다리는 중 입니다...');
+    }
+
+    if (room.status === 'playing' && room.guest) {
+      const guestName = room.guestName ?? this.multiplayerPlayers.guest?.name ?? 'Guest';
+      void this.startHostMultiplayerMatch(room.guest, guestName);
+    }
+  }
+
+  private handleGuestRoomUpdate(room: RoomData): void {
+    if (room.status === 'waiting' || !room.guest) {
+      if (this.hud) {
+        this.hud.showNotification('호스트가 게임을 종료했습니다. 로비로 돌아갑니다.');
+      }
+      this.changeScene('lobby');
+    }
+  }
+
+  private async startHostMultiplayerMatch(guestId: string, guestName: string): Promise<void> {
+    if (this.hasInitializedMultiplayerSystems) return;
+
+    if (!this.multiplayerPlayers) {
+      const currentUserId = getCurrentUserId() ?? 'host';
+      this.multiplayerPlayers = {
+        host: { id: currentUserId, name: 'Host' },
+      };
+    }
+
+    this.multiplayerPlayers.guest = {
+      id: guestId,
+      name: guestName,
+    };
+
+    await this.initializeLocalGameSystems(false);
+    this.startHostSyncLoop();
+    this.hasInitializedMultiplayerSystems = true;
+    this.hideWaitingOverlay();
+    this.destroyJoinRequestPrompt();
+  }
+
+  private async respondToJoinRequest(request: RoomJoinRequest, accept: boolean): Promise<void> {
+    if (!this.roomId) return;
+    const db = getRealtimeDatabase();
+    const roomRef = ref(db, `${FIREBASE_PATHS.ROOMS}/${this.roomId}`);
+
+    try {
+      if (accept) {
+        await update(roomRef, {
+          guest: request.playerId,
+          guestName: request.playerName,
+          status: 'playing',
+          joinRequest: null,
+          lastActivityAt: Date.now(),
+        });
+        await this.startHostMultiplayerMatch(request.playerId, request.playerName);
+      } else {
+        await update(roomRef, {
+          joinRequest: null,
+          status: 'waiting',
+          lastActivityAt: Date.now(),
+        });
+        this.showWaitingOverlay('도전자를 기다리는 중 입니다...');
+      }
+    } catch (error) {
+      console.error('Failed to respond to join request', error);
+      if (this.hud) {
+        this.hud.showNotification('요청을 처리하지 못했습니다. 잠시 후 다시 시도하세요.');
+      }
+    }
+  }
+
+  private showWaitingOverlay(message: string): void {
+    if (!this.waitingOverlay) {
+      const overlay = new Container();
+      overlay.position.set(GAME_WIDTH / 2, GAME_HEIGHT / 2);
+      overlay.zIndex = LAYERS.MODAL;
+
+      const dim = new Graphics();
+      dim.rect(-GAME_WIDTH / 2, -GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT);
+      dim.fill({ color: 0x000000, alpha: 0.5 });
+      overlay.addChild(dim);
+
+      const box = new Graphics();
+      box.roundRect(-220, -80, 440, 160, 20);
+      box.fill({ color: COLORS.SECONDARY, alpha: 0.95 });
+      box.stroke({ width: 3, color: COLORS.PRIMARY });
+      overlay.addChild(box);
+
+      const text = new Text({
+        text: message,
+        style: new TextStyle({
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          fontSize: 22,
+          fontWeight: 'bold',
+          fill: COLORS.TEXT,
+          align: 'center',
+        }),
+      });
+      text.anchor.set(0.5);
+      overlay.addChild(text);
+
+      this.waitingOverlay = overlay;
+      this.waitingOverlayText = text;
+      this.uiLayer.addChild(overlay);
+    }
+
+    if (this.waitingOverlayText) {
+      this.waitingOverlayText.text = message;
+    }
+
+    if (this.waitingOverlay) {
+      this.waitingOverlay.visible = true;
+    }
+  }
+
+  private hideWaitingOverlay(): void {
+    if (this.waitingOverlay) {
+      this.waitingOverlay.visible = false;
+    }
+  }
+
+  private destroyWaitingOverlay(): void {
+    if (this.waitingOverlay) {
+      this.uiLayer.removeChild(this.waitingOverlay);
+      this.waitingOverlay.destroy({ children: true });
+      this.waitingOverlay = null;
+      this.waitingOverlayText = null;
+    }
+  }
+
+  private showJoinRequestPrompt(request: RoomJoinRequest): void {
+    this.destroyJoinRequestPrompt();
+
+    const container = new Container();
+    container.position.set(GAME_WIDTH / 2, GAME_HEIGHT / 2);
+    container.zIndex = LAYERS.MODAL;
+
+    const dim = new Graphics();
+    dim.rect(-GAME_WIDTH / 2, -GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT);
+    dim.fill({ color: 0x000000, alpha: 0.6 });
+    container.addChild(dim);
+
+    const box = new Graphics();
+    box.roundRect(-260, -150, 520, 300, 20);
+    box.fill({ color: COLORS.SECONDARY, alpha: 0.95 });
+    box.stroke({ width: 3, color: COLORS.PRIMARY });
+    container.addChild(box);
+
+    const title = new Text({
+      text: '도전자가 입장을 요청했습니다',
+      style: new TextStyle({
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontSize: 24,
+        fontWeight: 'bold',
+        fill: COLORS.TEXT,
+      }),
+    });
+    title.anchor.set(0.5);
+    title.position.set(0, -80);
+    container.addChild(title);
+
+    const message = new Text({
+      text: `${request.playerName}님이 게임 참여를 희망합니다.\n게임을 시작할까요?`,
+      style: new TextStyle({
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontSize: 18,
+        fill: COLORS.TEXT,
+        align: 'center',
+      }),
+    });
+    message.anchor.set(0.5);
+    message.position.set(0, -10);
+    container.addChild(message);
+
+    const acceptButton = new Button({
+      text: '게임 시작',
+      width: 200,
+      height: 70,
+      backgroundColor: COLORS.PRIMARY,
+      textColor: COLORS.TEXT,
+      onClick: () => this.respondToJoinRequest(request, true),
+    });
+    acceptButton.position.set(-110, 90);
+    container.addChild(acceptButton);
+
+    const declineButton = new Button({
+      text: '거절',
+      width: 200,
+      height: 70,
+      backgroundColor: COLORS.SECONDARY,
+      textColor: COLORS.TEXT,
+      onClick: () => this.respondToJoinRequest(request, false),
+    });
+    declineButton.position.set(110, 90);
+    container.addChild(declineButton);
+
+    this.joinRequestPrompt = container;
+    this.uiLayer.addChild(container);
+  }
+
+  private destroyJoinRequestPrompt(): void {
+    if (this.joinRequestPrompt) {
+      this.uiLayer.removeChild(this.joinRequestPrompt);
+      this.joinRequestPrompt.destroy({ children: true });
+      this.joinRequestPrompt = null;
+    }
+  }
+
   private applyRemoteState(state: GameState): void {
     if (!this.multiplayerPlayers) return;
 
@@ -601,32 +877,45 @@ export class GameScene extends Scene {
     const localState = isLocalHost ? state.player : state.opponent;
     const remoteState = isLocalHost ? state.opponent : state.player;
 
-    this.playerHand.setCardsFromData(localState.hand, { showFront: true });
-    this.opponentHand.setCardsFromData(remoteState.hand, { showFront: false });
+    const normalizeHand = (hand?: CardData[]) => hand ?? [];
+    const normalizeCollected = (collected?: PlayerState['collected']) => ({
+      kwang: collected?.kwang ?? [],
+      animal: collected?.animal ?? [],
+      ribbon: collected?.ribbon ?? [],
+      pi: collected?.pi ?? [],
+    });
 
-    this.field.setCardsFromData(state.field);
-    this.deck.setFromCardData(state.deck);
+    const localHand = normalizeHand(localState?.hand);
+    const remoteHand = normalizeHand(remoteState?.hand);
+    const localCollected = normalizeCollected(localState?.collected);
+    const remoteCollected = normalizeCollected(remoteState?.collected);
 
-    this.playerCollectedDisplay.updateFromCardData(localState.collected);
-    this.opponentCollectedDisplay.updateFromCardData(remoteState.collected);
-    this.playerCollectedDisplay.updateTotalScore(localState.score);
-    this.opponentCollectedDisplay.updateTotalScore(remoteState.score);
+    this.playerHand.setCardsFromData(localHand, { showFront: true });
+    this.opponentHand.setCardsFromData(remoteHand, { showFront: false });
+
+    this.field.setCardsFromData(state.field ?? []);
+    this.deck.setFromCardData(state.deck ?? []);
+
+    this.playerCollectedDisplay.updateFromCardData(localCollected);
+    this.opponentCollectedDisplay.updateFromCardData(remoteCollected);
+    this.playerCollectedDisplay.updateTotalScore(localState?.score ?? 0);
+    this.opponentCollectedDisplay.updateTotalScore(remoteState?.score ?? 0);
 
     const localCounts = {
-      kwang: localState.collected.kwang.length,
-      animal: localState.collected.animal.length,
-      ribbon: localState.collected.ribbon.length,
-      pi: localState.collected.pi.length,
+      kwang: localCollected.kwang.length,
+      animal: localCollected.animal.length,
+      ribbon: localCollected.ribbon.length,
+      pi: localCollected.pi.length,
     };
     const remoteCounts = {
-      kwang: remoteState.collected.kwang.length,
-      animal: remoteState.collected.animal.length,
-      ribbon: remoteState.collected.ribbon.length,
-      pi: remoteState.collected.pi.length,
+      kwang: remoteCollected.kwang.length,
+      animal: remoteCollected.animal.length,
+      ribbon: remoteCollected.ribbon.length,
+      pi: remoteCollected.pi.length,
     };
 
     this.hud.updateCollectedCounts(localCounts, remoteCounts);
-    this.hud.updateScores({ player: localState.score, opponent: remoteState.score });
+    this.hud.updateScores({ player: localState?.score ?? 0, opponent: remoteState?.score ?? 0 });
 
     const localTurn = isLocalHost ? state.currentTurn : state.currentTurn === 'player' ? 'opponent' : 'player';
     this.hud.updateTurn(localTurn);

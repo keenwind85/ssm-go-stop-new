@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'robots.txt', 'assets/**/*'],
+      includeAssets: ['favicon.ico', 'robots.txt'],
       manifest: {
         name: '고스톱 - Go-Stop',
         short_name: '고스톱',
