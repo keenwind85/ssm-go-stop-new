@@ -214,6 +214,9 @@ export class GameScene extends Scene {
 
   private async initializeLocalGameSystems(isAIMode: boolean): Promise<void> {
     this.scoreCalculator = new ScoreCalculator();
+    // 멀티플레이어에서는 도전자(상대방)가 선공
+    // AI 모드에서는 플레이어가 선공
+    const firstTurn: 'player' | 'opponent' = isAIMode ? 'player' : 'opponent';
     this.turnManager = new TurnManager({
       deck: this.deck,
       field: this.field,
@@ -221,6 +224,7 @@ export class GameScene extends Scene {
       opponentHand: this.opponentHand,
       scoreCalculator: this.scoreCalculator,
       isAIMode,
+      firstTurn,
     });
 
     this.setupEventHandlers();

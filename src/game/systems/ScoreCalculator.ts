@@ -9,7 +9,7 @@ export class ScoreCalculator {
     const kwangScore = this.calculateKwangScore(categorized.kwang);
     const animalScore = this.calculateAnimalScore(categorized.animal);
     const ribbonResult = this.calculateRibbonScore(categorized.ribbon);
-    const piScore = this.calculatePiScore(categorized.pi);
+    const piResult = this.calculatePiScoreAndCount(categorized.pi);
 
     const special = {
       godori: this.checkGodori(categorized.animal),
@@ -18,7 +18,7 @@ export class ScoreCalculator {
       chodan: ribbonResult.chodan,
     };
 
-    const baseTotal = kwangScore + animalScore + ribbonResult.score + piScore;
+    const baseTotal = kwangScore + animalScore + ribbonResult.score + piResult.score;
 
     // Add special bonuses
     let specialBonus = 0;
@@ -29,14 +29,18 @@ export class ScoreCalculator {
 
     return {
       kwang: kwangScore,
+      kwangCount: categorized.kwang.length,
       animal: animalScore,
       ribbon: ribbonResult.score,
-      pi: piScore,
+      pi: piResult.score,
+      piCount: piResult.count,
       special,
       multipliers: {
         go: 1,
         shake: 1,
         ppuk: 1,
+        piBak: 1,
+        gwangBak: 1,
       },
       total: baseTotal + specialBonus,
     };
@@ -106,7 +110,7 @@ export class ScoreCalculator {
     return { score, hongdan, cheongdan, chodan };
   }
 
-  private calculatePiScore(piCards: Card[]): number {
+  private calculatePiScoreAndCount(piCards: Card[]): { score: number; count: number } {
     // Count pi points (some cards are worth 2)
     let piCount = 0;
     piCards.forEach(card => {
@@ -119,11 +123,12 @@ export class ScoreCalculator {
       }
     });
 
+    let score = 0;
     if (piCount >= 10) {
-      return SCORING.PI.BASE + (piCount - 10) * SCORING.PI.EXTRA_PER_CARD;
+      score = SCORING.PI.BASE + (piCount - 10) * SCORING.PI.EXTRA_PER_CARD;
     }
 
-    return 0;
+    return { score, count: piCount };
   }
 
   private checkGodori(animalCards: Card[]): boolean {
@@ -134,25 +139,37 @@ export class ScoreCalculator {
   }
 
   // Calculate if a player can declare "Go"
+  // 7점 이상이어야 고/스톱 선언 가능
   canDeclareGo(collectedCards: Card[]): boolean {
     const score = this.calculate(collectedCards);
-    return score.total >= 3;
+    return score.total >= 7;
   }
 
   // Apply multipliers for Go count, shake, etc.
+  // opponentPiCount: 상대방의 피 점수 (피박 계산용)
+  // opponentKwangCount: 상대방의 광 개수 (광박 계산용)
   applyMultipliers(
     baseScore: ScoreBreakdown,
     goCount: number,
     hasShake: boolean,
-    hasPpuk: boolean
+    hasPpuk: boolean,
+    opponentPiCount: number = 10, // 기본값: 피박 아님
+    opponentKwangCount: number = 1 // 기본값: 광박 아님
   ): ScoreBreakdown {
+    // 피박: 상대방이 피를 10점 미만 먹었을 때
+    const hasPiBak = opponentPiCount < 10;
+    // 광박: 상대방이 광을 하나도 못 먹었을 때
+    const hasGwangBak = opponentKwangCount === 0;
+
     const multipliers = {
-      go: Math.pow(2, goCount),
+      go: 1 + goCount, // 고 배수: 선형 (1고 = x2, 2고 = x3, ...)
       shake: hasShake ? SCORING.SPECIAL.SHAKE : 1,
       ppuk: hasPpuk ? SCORING.SPECIAL.PPUK : 1,
+      piBak: hasPiBak ? SCORING.SPECIAL.PI_BAK : 1,
+      gwangBak: hasGwangBak ? SCORING.SPECIAL.GWANG_BAK : 1,
     };
 
-    const totalMultiplier = multipliers.go * multipliers.shake * multipliers.ppuk;
+    const totalMultiplier = multipliers.go * multipliers.shake * multipliers.ppuk * multipliers.piBak * multipliers.gwangBak;
 
     return {
       ...baseScore,

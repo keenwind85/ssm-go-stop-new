@@ -14,6 +14,7 @@ interface TurnManagerConfig {
   opponentHand: Hand;
   scoreCalculator: ScoreCalculator;
   isAIMode: boolean;
+  firstTurn?: 'player' | 'opponent'; // 멀티플레이어: 도전자(상대방)가 선공
 }
 
 export class TurnManager extends EventEmitter {
@@ -23,6 +24,7 @@ export class TurnManager extends EventEmitter {
   private opponentHand: Hand;
   private scoreCalculator: ScoreCalculator;
   private isAIMode: boolean;
+  private firstTurn: 'player' | 'opponent';
 
   private currentTurn: 'player' | 'opponent' = 'player';
   private phase: GamePhase = 'waiting';
@@ -51,33 +53,35 @@ export class TurnManager extends EventEmitter {
     this.opponentHand = config.opponentHand;
     this.scoreCalculator = config.scoreCalculator;
     this.isAIMode = config.isAIMode;
+    this.firstTurn = config.firstTurn ?? 'player'; // 기본값: player 선공, 멀티플레이어: opponent(도전자) 선공
   }
 
   async dealInitialCards(): Promise<void> {
     this.phase = 'dealing';
     this.deck.shuffle();
 
-    // Deal pattern: 4 to player, 4 to field, 4 to opponent (repeat twice)
+    // Deal pattern: 5 to player, 4 to field, 5 to opponent (repeat twice)
+    // Total: 10 cards per player, 8 cards on field, 20 cards remaining in deck
     for (let round = 0; round < 2; round++) {
-      // Deal to player
-      const playerCards = this.deck.drawMultiple(4);
+      // Deal to player (5 cards per round = 10 total)
+      const playerCards = this.deck.drawMultiple(5);
       for (const card of playerCards) {
         this.playerHand.addCard(card);
-        await delay(100);
+        await delay(80);
       }
 
-      // Deal to field
+      // Deal to field (4 cards per round = 8 total)
       const fieldCards = this.deck.drawMultiple(4);
       for (const card of fieldCards) {
         this.field.addCard(card);
-        await delay(100);
+        await delay(80);
       }
 
-      // Deal to opponent
-      const opponentCards = this.deck.drawMultiple(4);
+      // Deal to opponent (5 cards per round = 10 total)
+      const opponentCards = this.deck.drawMultiple(5);
       for (const card of opponentCards) {
         this.opponentHand.addCard(card);
-        await delay(100);
+        await delay(80);
       }
     }
 
@@ -87,8 +91,8 @@ export class TurnManager extends EventEmitter {
     // Check for initial shake/bomb
     await this.checkInitialSpecials();
 
-    // Start first turn
-    this.startTurn('player');
+    // Start first turn (멀티플레이어에서는 도전자=상대방 선공)
+    this.startTurn(this.firstTurn);
   }
 
   // 초기 패에서 흔들기/폭탄 확인
@@ -251,8 +255,13 @@ export class TurnManager extends EventEmitter {
       // One match - auto collect
       this.pendingFieldCards = matchingCards;
       this.playCard(card, 'player');
+    } else if (matchingCards.length === 3) {
+      // Three matches - 뻑(Ppuk): card goes to field, wait for deck draw
+      this.pendingFieldCards = []; // Clear - don't collect from hand play
+      this.playCard(card, 'player');
+      this.emit('ppukPending', card.getMonth());
     } else {
-      // Multiple matches - player must choose
+      // Two matches - player must choose
       this.phase = 'selecting';
       this.pendingFieldCards = matchingCards;
       this.emit('requireFieldSelection', matchingCards);
@@ -279,6 +288,11 @@ export class TurnManager extends EventEmitter {
 
     if (matchingCards.length === 0) {
       // No match - add to field with animation
+      await this.animateCardToField(card);
+      this.field.addCard(card);
+    } else if (matchingCards.length === 3 || (this.pendingFieldCards.length === 0 && this.field.getMatchingCards(card.getMonth()).length === 3)) {
+      // 뻑(Ppuk) - 3 cards on field, add hand card to field instead of collecting
+      // Collection will happen in deck draw phase if deck card matches
       await this.animateCardToField(card);
       this.field.addCard(card);
     } else {
@@ -382,8 +396,8 @@ export class TurnManager extends EventEmitter {
 
     const score = this.scoreCalculator.calculate(collected);
 
-    // 3점 이상이고, 첫 번째 고이거나 이전 점수보다 높아야 함
-    if (score.total >= 3 && (goCount === 0 || score.total > previousScore)) {
+    // 7점 이상이고, 첫 번째 고이거나 이전 점수보다 높아야 함
+    if (score.total >= 7 && (goCount === 0 || score.total > previousScore)) {
       this.phase = 'goStop';
       this.emit('goStopDecision', { player, score: score.total, goCount });
 
@@ -432,28 +446,43 @@ export class TurnManager extends EventEmitter {
 
     const player = this.currentTurn;
     const collected = player === 'player' ? this.playerCollected : this.opponentCollected;
+    const opponentCollected = player === 'player' ? this.opponentCollected : this.playerCollected;
     const goCount = player === 'player' ? this.playerGoCount : this.opponentGoCount;
     const hasShake = player === 'player' ? this.playerHasShake : this.opponentHasShake;
     const hasPpuk = player === 'player' ? this.playerHasPpuk : this.opponentHasPpuk;
 
+    // 상대방의 점수 정보 (피박, 광박 계산용)
+    const opponentBaseScore = this.scoreCalculator.calculate(opponentCollected);
     const baseScore = this.scoreCalculator.calculate(collected);
-    const finalScore = this.scoreCalculator.applyMultipliers(baseScore, goCount, hasShake, hasPpuk);
+    const finalScore = this.scoreCalculator.applyMultipliers(
+      baseScore, goCount, hasShake, hasPpuk,
+      opponentBaseScore.piCount, opponentBaseScore.kwangCount
+    );
 
     this.phase = 'gameOver';
     this.emit('stopDeclared', { player, score: finalScore });
+
+    // 각 플레이어의 최종 점수 계산 (상대방 기준 피박/광박 적용)
+    const playerBaseScore = this.scoreCalculator.calculate(this.playerCollected);
+    const opponentFinalBaseScore = this.scoreCalculator.calculate(this.opponentCollected);
+
     this.emit('gameEnd', {
       winner: player,
       playerScore: this.scoreCalculator.applyMultipliers(
-        this.scoreCalculator.calculate(this.playerCollected),
+        playerBaseScore,
         this.playerGoCount,
         this.playerHasShake,
-        this.playerHasPpuk
+        this.playerHasPpuk,
+        opponentFinalBaseScore.piCount,
+        opponentFinalBaseScore.kwangCount
       ),
       opponentScore: this.scoreCalculator.applyMultipliers(
-        this.scoreCalculator.calculate(this.opponentCollected),
+        opponentFinalBaseScore,
         this.opponentGoCount,
         this.opponentHasShake,
-        this.opponentHasPpuk
+        this.opponentHasPpuk,
+        playerBaseScore.piCount,
+        playerBaseScore.kwangCount
       ),
     });
   }
@@ -595,18 +624,22 @@ export class TurnManager extends EventEmitter {
     const playerBaseScore = this.scoreCalculator.calculate(this.playerCollected);
     const opponentBaseScore = this.scoreCalculator.calculate(this.opponentCollected);
 
-    // 배수 적용
+    // 배수 적용 (상대방 기준 피박/광박 적용)
     const playerScore = this.scoreCalculator.applyMultipliers(
       playerBaseScore,
       this.playerGoCount,
       this.playerHasShake,
-      this.playerHasPpuk
+      this.playerHasPpuk,
+      opponentBaseScore.piCount,
+      opponentBaseScore.kwangCount
     );
     const opponentScore = this.scoreCalculator.applyMultipliers(
       opponentBaseScore,
       this.opponentGoCount,
       this.opponentHasShake,
-      this.opponentHasPpuk
+      this.opponentHasPpuk,
+      playerBaseScore.piCount,
+      playerBaseScore.kwangCount
     );
 
     // 무승부(나가리) 확인

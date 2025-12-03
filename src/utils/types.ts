@@ -89,9 +89,11 @@ export interface GameAction {
 // Scoring
 export interface ScoreBreakdown {
   kwang: number;
+  kwangCount: number; // 광 카드 개수 (광박 계산용)
   animal: number;
   ribbon: number;
   pi: number;
+  piCount: number; // 피 점수 (쌍피는 2점, 피박 계산용)
   special: {
     godori: boolean;
     hongdan: boolean;
@@ -102,6 +104,8 @@ export interface ScoreBreakdown {
     go: number;
     shake: number;
     ppuk: number;
+    piBak: number;
+    gwangBak: number;
   };
   total: number;
 }

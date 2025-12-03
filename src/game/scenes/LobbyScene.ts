@@ -22,6 +22,11 @@ export class LobbyScene extends Scene {
   private isWaitingForApproval = false;
   private pendingRoomId: string | null = null;
 
+  // Fullscreen toggle buttons
+  private fullscreenButton: Button | null = null;
+  private windowedButton: Button | null = null;
+  private fullscreenChangeHandler: (() => void) | null = null;
+
   constructor(app: Application) {
     super(app);
   }
@@ -31,6 +36,7 @@ export class LobbyScene extends Scene {
     this.createLayout();
     this.createRoomListPanel();
     this.createButtons();
+    this.createFullscreenButtons();
     this.createStatusDisplay();
     this.subscribeToRooms();
   }
@@ -40,14 +46,24 @@ export class LobbyScene extends Scene {
     this.roomWatcherUnsubscribe?.();
     this.matchmaking?.cleanup();
 
+    // Remove fullscreen change listener
+    if (this.fullscreenChangeHandler) {
+      document.removeEventListener('fullscreenchange', this.fullscreenChangeHandler);
+      this.fullscreenChangeHandler = null;
+    }
+
     this.practiceButton?.destroy();
     this.createRoomButton?.destroy();
     this.joinRoomButton?.destroy();
+    this.fullscreenButton?.destroy();
+    this.windowedButton?.destroy();
     this.roomListContainer?.destroy({ children: true });
 
     this.practiceButton = null;
     this.createRoomButton = null;
     this.joinRoomButton = null;
+    this.fullscreenButton = null;
+    this.windowedButton = null;
     this.roomListContainer = null;
     this.statusText = null;
 
@@ -194,6 +210,70 @@ export class LobbyScene extends Scene {
     this.statusText.anchor.set(0.5);
     this.statusText.position.set(GAME_WIDTH / 2, 700);
     this.container.addChild(this.statusText);
+  }
+
+  private createFullscreenButtons(): void {
+    // 전체화면 버튼
+    this.fullscreenButton = new Button({
+      text: '전체화면',
+      width: 120,
+      height: 40,
+      backgroundColor: 0x4a5568,
+      textColor: COLORS.TEXT,
+      fontSize: 16,
+      onClick: () => this.enterFullscreen(),
+    });
+    this.fullscreenButton.position.set(GAME_WIDTH - 80, 40);
+    this.container.addChild(this.fullscreenButton);
+
+    // 창모드 버튼
+    this.windowedButton = new Button({
+      text: '창모드',
+      width: 120,
+      height: 40,
+      backgroundColor: 0x4a5568,
+      textColor: COLORS.TEXT,
+      fontSize: 16,
+      onClick: () => this.exitFullscreen(),
+    });
+    this.windowedButton.position.set(GAME_WIDTH - 80, 40);
+    this.container.addChild(this.windowedButton);
+
+    // 현재 상태에 따라 버튼 표시/숨김
+    this.updateFullscreenButtons();
+
+    // fullscreenchange 이벤트 리스너 등록
+    this.fullscreenChangeHandler = () => this.updateFullscreenButtons();
+    document.addEventListener('fullscreenchange', this.fullscreenChangeHandler);
+  }
+
+  private updateFullscreenButtons(): void {
+    const isFullscreen = !!document.fullscreenElement;
+
+    if (this.fullscreenButton) {
+      this.fullscreenButton.visible = !isFullscreen;
+    }
+    if (this.windowedButton) {
+      this.windowedButton.visible = isFullscreen;
+    }
+  }
+
+  private async enterFullscreen(): Promise<void> {
+    try {
+      await document.documentElement.requestFullscreen();
+    } catch (error) {
+      console.warn('전체화면 모드를 지원하지 않는 브라우저입니다.', error);
+    }
+  }
+
+  private async exitFullscreen(): Promise<void> {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      }
+    } catch (error) {
+      console.warn('창모드 전환에 실패했습니다.', error);
+    }
   }
 
   private renderRoomList(): void {
