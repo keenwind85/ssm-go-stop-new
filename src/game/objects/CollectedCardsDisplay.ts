@@ -15,6 +15,7 @@ export class CollectedCardsDisplay extends Container {
   private groups: Map<CardType, CollectedCardGroup> = new Map();
   private totalScoreText: Text;
   private background: Graphics;
+  private nameLabel: Text;
 
   // Card display dimensions
   private static readonly CARD_WIDTH = 32;
@@ -33,8 +34,8 @@ export class CollectedCardsDisplay extends Container {
     this.background.stroke({ width: 2, color: isPlayer ? COLORS.PRIMARY : COLORS.WARNING, alpha: 0.8 });
     this.addChild(this.background);
 
-    // Create label
-    const labelText = new Text({
+    // Create label (player name will be set later for multiplayer)
+    this.nameLabel = new Text({
       text: isPlayer ? '나의 점수패' : '상대 점수패',
       style: new TextStyle({
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
@@ -43,9 +44,9 @@ export class CollectedCardsDisplay extends Container {
         fill: isPlayer ? COLORS.PRIMARY : COLORS.WARNING,
       }),
     });
-    labelText.anchor.set(0.5);
-    labelText.position.set(0, -70);
-    this.addChild(labelText);
+    this.nameLabel.anchor.set(0.5);
+    this.nameLabel.position.set(0, -70);
+    this.addChild(this.nameLabel);
 
     // Create groups for each card type
     this.createCardGroups();
@@ -250,5 +251,9 @@ export class CollectedCardsDisplay extends Container {
       group.countText.text = '0';
     });
     this.totalScoreText.text = '0점';
+  }
+
+  setPlayerName(name: string): void {
+    this.nameLabel.text = name;
   }
 }

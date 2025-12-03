@@ -30,6 +30,7 @@ export class Hand extends Container {
 
     // Setup selection and hover for player's cards
     if (this.isPlayer) {
+      console.log('[Hand] Setting up event listeners for card:', card.cardData.id);
       card.on('selected', () => this.onCardSelected(card));
       card.on('pointerover', () => this.onCardHover(card));
       card.on('pointerout', () => this.onCardHoverEnd());
@@ -67,6 +68,8 @@ export class Hand extends Container {
   }
 
   private onCardSelected(card: Card): void {
+    console.log('[Hand] onCardSelected called for card:', card.cardData.id, 'isPlayer:', this.isPlayer);
+
     // Deselect previous card
     if (this.selectedCard && this.selectedCard !== card) {
       this.selectedCard.setSelected(false);
@@ -76,9 +79,11 @@ export class Hand extends Container {
     if (this.selectedCard === card) {
       card.setSelected(false);
       this.selectedCard = null;
+      console.log('[Hand] Card deselected (toggle off)');
     } else {
       card.setSelected(true);
       this.selectedCard = card;
+      console.log('[Hand] Card selected, emitting cardSelected event');
       this.emit('cardSelected', card);
     }
   }

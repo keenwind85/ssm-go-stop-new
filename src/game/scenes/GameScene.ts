@@ -644,41 +644,77 @@ export class GameScene extends Scene {
   private setupGuestView(): void {
     if (!this.gameSync) return;
 
+    console.log('[Guest] Setting up guest view');
+
+    // 게스트용 이벤트 핸들러 먼저 설정 (호스트에게 액션 전달)
+    // 상태 변경보다 먼저 설정해야 카드가 생성될 때 이벤트가 제대로 연결됨
+    this.setupGuestEventHandlers();
+
     // Show waiting overlay until host starts the game
     this.showWaitingOverlay('호스트가 게임을 시작하기를 기다리는 중...');
 
     this.gameSync.onGameStateChange((state) => {
+      console.log('[Guest] Received game state change:', state?.phase, state?.currentTurn);
       // Hide waiting overlay once we receive game state
       if (state && state.phase !== 'waiting') {
-        this.hideWaitingOverlay();
+        console.log('[Guest] Hiding waiting overlay, destroying it completely');
+        this.destroyWaitingOverlay();
       }
       this.applyRemoteState(state);
     });
-
-    // 게스트용 이벤트 핸들러 설정 (호스트에게 액션 전달)
-    this.setupGuestEventHandlers();
   }
 
   // 게스트가 카드를 선택하면 호스트에게 전달
   private setupGuestEventHandlers(): void {
     if (!this.gameSync) return;
 
+    console.log('[Guest] Setting up guest event handlers for playerHand');
+
     // 플레이어(게스트) 카드 선택 - 호스트에게 전달
     this.playerHand.on('cardSelected', (card: Card) => {
-      if (!this.gameSync) return;
+      console.log('[Guest] playerHand cardSelected event received:', card.cardData.id);
+      if (!this.gameSync) {
+        console.warn('[Guest] gameSync is null, cannot send action');
+        return;
+      }
 
-      // 호스트에게 카드 플레이 액션 전달
+      // 호스트에게 카드 플레이 액션 전달 (턴 체크는 호스트가 함)
+      console.log('[Guest] Sending PLAY_CARD action to Firebase:', card.cardData.id, 'month:', card.getMonth());
       this.gameSync.playCard(card.cardData.id, {
         targetMonth: card.getMonth(),
+      }).then(() => {
+        console.log('[Guest] PLAY_CARD action sent successfully');
+      }).catch((error) => {
+        console.error('[Guest] Failed to send PLAY_CARD action:', error);
       });
+    });
+
+    // 플레이어 카드 호버 - 필드 매칭 카드 하이라이트
+    this.playerHand.on('cardHover', (month: number) => {
+      this.field.highlightMatchingCards(month);
+    });
+
+    this.playerHand.on('cardHoverEnd', () => {
+      this.field.clearAllHighlights();
     });
 
     // 필드 카드 선택 (2장 매칭 시) - 호스트에게 전달
     this.field.on('cardSelected', (card: Card) => {
-      if (!this.gameSync) return;
+      console.log('[Guest] Field card selected:', card.cardData.id);
+      if (!this.gameSync) {
+        console.warn('[Guest] gameSync is null, cannot send field selection');
+        return;
+      }
 
-      this.gameSync.selectFieldCard(card.cardData.id);
+      console.log('[Guest] Sending SELECT_FIELD_CARD action to Firebase');
+      this.gameSync.selectFieldCard(card.cardData.id).then(() => {
+        console.log('[Guest] SELECT_FIELD_CARD action sent successfully');
+      }).catch((error) => {
+        console.error('[Guest] Failed to send SELECT_FIELD_CARD action:', error);
+      });
     });
+
+    console.log('[Guest] Event handlers setup complete');
   }
 
   private attachRoomListener(): void {
@@ -779,6 +815,10 @@ export class GameScene extends Scene {
     // 호스트: 게스트의 액션을 수신하도록 리스너 설정
     this.setupHostOpponentActionListener();
 
+    // 플레이어 이름 표시 (호스트: 자신이 player, 상대가 opponent)
+    this.playerCollectedDisplay.setPlayerName(this.multiplayerPlayers.host.name);
+    this.opponentCollectedDisplay.setPlayerName(guestName);
+
     // 게임 시작 시 즉시 상태를 한 번 동기화하여 게스트에게 초기 상태 전달
     await this.broadcastGameState();
 
@@ -789,41 +829,71 @@ export class GameScene extends Scene {
 
   // 호스트: 게스트의 액션을 수신하여 처리
   private setupHostOpponentActionListener(): void {
-    if (!this.gameSync || !this.turnManager) return;
+    if (!this.gameSync || !this.turnManager) {
+      console.warn('[Host] Cannot set up opponent action listener - missing gameSync or turnManager');
+      return;
+    }
+
+    console.log('[Host] Setting up opponent action listener');
 
     this.gameSync.onOpponentAction((action) => {
-      if (!this.turnManager) return;
+      console.log('[Host] Received opponent action:', action.type, action);
+      if (!this.turnManager) {
+        console.warn('[Host] turnManager is null');
+        return;
+      }
 
-      // 상대방(게스트) 턴일 때만 액션 처리
-      if (this.turnManager.getCurrentTurn() !== 'opponent') {
-        console.warn('Received opponent action but it is not opponent turn');
+      const currentTurn = this.turnManager.getCurrentTurn();
+      const phase = this.turnManager.getPhase();
+      console.log('[Host] Current turn:', currentTurn, 'Phase:', phase);
+
+      // 상대방(게스트) 턴일 때만 카드 플레이 액션 처리
+      // 필드 카드 선택은 selecting 상태에서도 처리
+      if (action.type === 'PLAY_CARD' && currentTurn !== 'opponent') {
+        console.warn('[Host] Received PLAY_CARD but it is not opponent turn. Current turn:', currentTurn, 'Phase:', phase);
         return;
       }
 
       switch (action.type) {
         case 'PLAY_CARD': {
           // 상대방이 플레이한 카드 찾기
-          const card = this.opponentHand.getCards().find(c => c.cardData.id === action.cardId);
+          const opponentCards = this.opponentHand.getCards();
+          console.log('[Host] Looking for card', action.cardId, 'in opponent hand. Available cards:', opponentCards.map(c => c.cardData.id));
+          const card = opponentCards.find(c => c.cardData.id === action.cardId);
           if (card) {
+            console.log('[Host] Found card, calling handleOpponentCardPlay');
             this.turnManager.handleOpponentCardPlay(card);
           } else {
-            console.warn('Card not found in opponent hand:', action.cardId);
+            console.warn('[Host] Card not found in opponent hand:', action.cardId);
           }
           break;
         }
         case 'SELECT_FIELD_CARD': {
-          // 필드 카드 선택 (2장 매칭 시)
+          // 필드 카드 선택 (2장 매칭 시 또는 뒷패 선택 시)
+          console.log('[Host] Processing field card selection:', action.targetCardId, 'Phase:', phase);
           const fieldCard = this.field.getAllCards().find(c => c.cardData.id === action.targetCardId);
           if (fieldCard) {
-            this.turnManager.handleOpponentFieldSelection(fieldCard);
+            if (phase === 'selecting') {
+              console.log('[Host] Found field card, calling handleOpponentFieldSelection');
+              this.turnManager.handleOpponentFieldSelection(fieldCard);
+            } else if (phase === 'deckSelecting') {
+              console.log('[Host] Found field card, calling handleOpponentDeckCardSelection');
+              this.turnManager.handleOpponentDeckCardSelection(fieldCard);
+            } else {
+              console.warn('[Host] Field card selection received but phase is not selecting:', phase);
+            }
+          } else {
+            console.warn('[Host] Field card not found:', action.targetCardId);
           }
           break;
         }
         case 'DECLARE_GO': {
+          console.log('[Host] Processing DECLARE_GO');
           this.turnManager.declareGo();
           break;
         }
         case 'DECLARE_STOP': {
+          console.log('[Host] Processing DECLARE_STOP');
           this.turnManager.declareStop();
           break;
         }
@@ -871,6 +941,8 @@ export class GameScene extends Scene {
       const dim = new Graphics();
       dim.rect(-GAME_WIDTH / 2, -GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT);
       dim.fill({ color: 0x000000, alpha: 0.5 });
+      // Block all events when overlay is visible
+      dim.eventMode = 'static';
       overlay.addChild(dim);
 
       const box = new Graphics();
@@ -1005,6 +1077,14 @@ export class GameScene extends Scene {
     const currentUserId = getCurrentUserId();
     const isLocalHost = currentUserId === this.multiplayerPlayers.host.id;
 
+    console.log('[applyRemoteState] isLocalHost:', isLocalHost, 'state.currentTurn:', state.currentTurn);
+
+    // 게스트: 플레이어 이름 표시 (게스트 입장에서 자신이 player, 호스트가 opponent)
+    if (!isLocalHost && this.multiplayerPlayers.guest) {
+      this.playerCollectedDisplay.setPlayerName(this.multiplayerPlayers.guest.name);
+      this.opponentCollectedDisplay.setPlayerName(this.multiplayerPlayers.host.name);
+    }
+
     const localState = isLocalHost ? state.player : state.opponent;
     const remoteState = isLocalHost ? state.opponent : state.player;
 
@@ -1049,6 +1129,12 @@ export class GameScene extends Scene {
     this.hud.updateScores({ player: localState?.score ?? 0, opponent: remoteState?.score ?? 0 });
 
     const localTurn = isLocalHost ? state.currentTurn : state.currentTurn === 'player' ? 'opponent' : 'player';
+    console.log('[applyRemoteState] localTurn computed:', localTurn, '(state.currentTurn:', state.currentTurn, ')');
     this.hud.updateTurn(localTurn);
+
+    // 게스트가 자신의 턴일 때 알림 표시
+    if (!isLocalHost && localTurn === 'player' && state.phase !== 'waiting' && state.phase !== 'dealing') {
+      console.log('[Guest] It is my turn! Cards should be clickable');
+    }
   }
 }

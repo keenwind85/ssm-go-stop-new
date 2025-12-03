@@ -59,6 +59,7 @@ export class Card extends Sprite {
   }
 
   private onPointerDown(): void {
+    console.log('[Card] onPointerDown - Card clicked:', this.cardData.id);
     this.emit('selected', this);
   }
 

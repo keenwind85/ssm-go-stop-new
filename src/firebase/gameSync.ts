@@ -47,9 +47,16 @@ export class GameSync {
       timestamp: Date.now(),
     };
 
-    await update(this.gameStateRef, {
-      lastAction: fullAction,
-    });
+    console.log('[GameSync] Sending action to Firebase:', fullAction);
+    try {
+      await update(this.gameStateRef, {
+        lastAction: fullAction,
+      });
+      console.log('[GameSync] Action sent successfully');
+    } catch (error) {
+      console.error('[GameSync] Failed to send action:', error);
+      throw error;
+    }
   }
 
   async playCard(cardId: string, options?: { targetMonth?: number; targetCardId?: string }): Promise<void> {
@@ -92,6 +99,7 @@ export class GameSync {
 
   onOpponentAction(callback: (action: GameAction) => void): void {
     const userId = getCurrentUserId();
+    console.log('[GameSync] Setting up onOpponentAction listener for user:', userId);
     const lastActionRef = ref(
       this.database,
       `${FIREBASE_PATHS.ROOMS}/${this.roomId}/gameState/lastAction`
@@ -100,9 +108,13 @@ export class GameSync {
     const unsubscribe = onValue(lastActionRef, (snapshot: DataSnapshot) => {
       if (snapshot.exists()) {
         const action = snapshot.val() as GameAction;
+        console.log('[GameSync] Received lastAction update:', action, 'My userId:', userId);
         // Only trigger for opponent's actions
         if (action.playerId !== userId) {
+          console.log('[GameSync] This is opponent action, triggering callback');
           callback(action);
+        } else {
+          console.log('[GameSync] This is my own action, ignoring');
         }
       }
     });
