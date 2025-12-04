@@ -75,7 +75,8 @@ export type GameActionType =
   | 'DECLARE_GO'
   | 'DECLARE_STOP'
   | 'SHAKE'
-  | 'BOMB';
+  | 'BOMB'
+  | 'TIMEOUT_SKIP';  // 턴 타임아웃으로 인한 스킵
 
 export interface GameAction {
   type: GameActionType;
