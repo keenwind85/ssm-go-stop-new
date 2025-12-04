@@ -874,6 +874,30 @@ export class TurnManager extends EventEmitter {
     }
   }
 
+  // Force skip opponent's turn when they timeout (호스트에서만 호출)
+  async forceSkipOpponentTurn(): Promise<void> {
+    if (this.phase !== 'opponentTurn') {
+      console.log('[TurnManager] forceSkipOpponentTurn called but phase is not opponentTurn:', this.phase);
+      return;
+    }
+
+    console.log('[TurnManager] Forcing opponent turn skip due to timeout');
+    this.phase = 'resolving';
+    this.emit('resolving');
+
+    // Clear any selection state
+    this.field.clearAllHighlights();
+
+    // 상대방 턴을 덱에서 카드 뽑기로 처리
+    await delay(500);
+    const needsSelection = await this.drawFromDeck('opponent');
+
+    // 뒷패 선택이 필요하지 않으면 턴 종료 처리
+    if (!needsSelection) {
+      await this.finishTurnAfterDraw();
+    }
+  }
+
   private checkGameEnd(): boolean {
     // Game ends when deck is empty and both players have no cards
     const deckEmpty = this.deck.getRemainingCount() === 0;
