@@ -8,9 +8,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'robots.txt'],
       manifest: {
-        name: '고스톱 - Go-Stop',
-        short_name: '고스톱',
-        description: '실시간 멀티플레이어 고스톱 게임',
+        name: '순시미 맞고 - Go-Stop',
+        short_name: '순시미 맞고',
+        description: '실시간 멀티플레이어 맞고 게임',
         theme_color: '#1a1a2e',
         background_color: '#1a1a2e',
         display: 'fullscreen',
@@ -32,6 +32,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,json,woff2}'],
+        maximumFileSizeToCacheInBytes: 10 * 1024 * 1024, // 10MB로 증가
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/firebasestorage\.googleapis\.com\/.*/i,

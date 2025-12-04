@@ -1,6 +1,6 @@
 import { Container, Graphics, Text, TextStyle, Rectangle } from 'pixi.js';
 import gsap from 'gsap';
-import { COLORS } from '@utils/constants';
+import { COLORS, FONTS } from '@utils/constants';
 
 interface ButtonOptions {
   text: string;
@@ -43,7 +43,7 @@ export class Button extends Container {
     this.labelText = new Text({
       text: this.options.text,
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: this.options.fontSize,
         fontWeight: 'bold',
         fill: this.options.textColor,

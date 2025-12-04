@@ -54,11 +54,11 @@ export interface GameState {
   opponent: PlayerState;
   lastAction?: GameAction;
   selectionContext?: {
-    type: 'deck';
-    options: CardData[];
-    drawnCard: CardData;
-    requiredFor: 'player' | 'opponent';
-  };
+    type: 'hand' | 'deck';        // 'hand': 손패로 2장 매칭, 'deck': 뒷패로 2장 매칭
+    options: CardData[];           // 선택 가능한 바닥패 목록
+    playedCard: CardData;          // 손패 또는 뒷패에서 플레이한 카드
+    requiredFor: 'player' | 'opponent';  // 선택해야 하는 플레이어
+  } | null;  // null for Firebase compatibility (undefined is rejected)
   goStopContext?: {
     player: 'player' | 'opponent';
     score: number;
@@ -106,6 +106,9 @@ export interface ScoreBreakdown {
     ppuk: number;
     piBak: number;
     gwangBak: number;
+    mungDda: number;  // 멍따: 열끗 7장 이상
+    mungBak: number;  // 멍박: 상대 열끗 0장
+    goBak: number;    // 고박: 상대가 고 선언 후 내가 스톱
   };
   total: number;
 }

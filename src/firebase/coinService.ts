@@ -1,7 +1,7 @@
 /**
  * 코인 서비스 - 코인 관련 모든 Firebase 작업 처리
  */
-import { ref, get, set, update, query, orderByChild, limitToLast, onValue, push } from 'firebase/database';
+import { ref, get, set, update, onValue, push } from 'firebase/database';
 import { getRealtimeDatabase } from './config';
 import { getCurrentUserId } from './auth';
 import { FIREBASE_PATHS, COIN_CONSTANTS } from '@utils/constants';
@@ -354,37 +354,44 @@ export async function getCoinRanking(): Promise<CoinRanking[]> {
   const database = getRealtimeDatabase();
   const usersRef = ref(database, FIREBASE_PATHS.USERS);
 
-  // orderByChild와 limitToLast를 사용하여 상위 100명 조회
-  const rankingQuery = query(
-    usersRef,
-    orderByChild('coins'),
-    limitToLast(COIN_CONSTANTS.RANKING_LIMIT)
-  );
+  try {
+    // 모든 유저 데이터를 가져와서 클라이언트에서 정렬
+    // (Firebase 인덱스 없이도 동작)
+    const snapshot = await get(usersRef);
 
-  const snapshot = await get(rankingQuery);
+    if (!snapshot.exists()) {
+      console.log('[getCoinRanking] No users found');
+      return [];
+    }
 
-  if (!snapshot.exists()) {
+    const users: CoinRanking[] = [];
+    snapshot.forEach((childSnapshot) => {
+      const userData = childSnapshot.val() as UserData;
+      if (userData && userData.id && userData.name) {
+        users.push({
+          rank: 0, // 나중에 설정
+          userId: userData.id,
+          name: userData.name,
+          coins: userData.coins ?? 0,
+        });
+      }
+    });
+
+    // 코인 내림차순 정렬 후 순위 부여
+    users.sort((a, b) => b.coins - a.coins);
+
+    // 상위 100명만 선택 후 순위 부여
+    const topUsers = users.slice(0, COIN_CONSTANTS.RANKING_LIMIT);
+    topUsers.forEach((user, index) => {
+      user.rank = index + 1;
+    });
+
+    console.log('[getCoinRanking] Loaded rankings:', topUsers.length);
+    return topUsers;
+  } catch (error) {
+    console.error('[getCoinRanking] Error loading rankings:', error);
     return [];
   }
-
-  const users: CoinRanking[] = [];
-  snapshot.forEach((childSnapshot) => {
-    const userData = childSnapshot.val() as UserData;
-    users.push({
-      rank: 0, // 나중에 설정
-      userId: userData.id,
-      name: userData.name,
-      coins: userData.coins ?? 0,
-    });
-  });
-
-  // 코인 내림차순 정렬 후 순위 부여
-  users.sort((a, b) => b.coins - a.coins);
-  users.forEach((user, index) => {
-    user.rank = index + 1;
-  });
-
-  return users;
 }
 
 /**

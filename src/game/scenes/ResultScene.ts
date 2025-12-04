@@ -1,6 +1,6 @@
 import { Application, Graphics, Text, TextStyle, Container } from 'pixi.js';
 import { Scene } from './Scene';
-import { GAME_WIDTH, GAME_HEIGHT, COLORS } from '@utils/constants';
+import { GAME_WIDTH, GAME_HEIGHT, COLORS, FONTS } from '@utils/constants';
 import { Button } from '@ui/Button';
 import { GameSync } from '@fb/gameSync';
 import { getCurrentUserId } from '@fb/auth';
@@ -80,7 +80,7 @@ export class ResultScene extends Scene {
     const resultText = new Text({
       text: isWinner ? '승리!' : '패배',
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 64,
         fontWeight: 'bold',
         fill: isWinner ? COLORS.SUCCESS : COLORS.ERROR,
@@ -95,7 +95,7 @@ export class ResultScene extends Scene {
       const roundText = new Text({
         text: `${this.roundNumber}회차 게임 종료`,
         style: new TextStyle({
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          fontFamily: FONTS.PRIMARY,
           fontSize: 24,
           fill: COLORS.TEXT_MUTED,
         }),
@@ -110,7 +110,7 @@ export class ResultScene extends Scene {
       const scoreText = new Text({
         text: `${data.playerScore} : ${data.opponentScore}`,
         style: new TextStyle({
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          fontFamily: FONTS.PRIMARY,
           fontSize: 48,
           fill: COLORS.TEXT,
         }),
@@ -165,7 +165,7 @@ export class ResultScene extends Scene {
       const labelText = new Text({
         text: label,
         style: new TextStyle({
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          fontFamily: FONTS.PRIMARY,
           fontSize: 18,
           fill: COLORS.TEXT_MUTED,
         }),
@@ -178,7 +178,7 @@ export class ResultScene extends Scene {
       const playerText = new Text({
         text: playerValues[index].toString(),
         style: new TextStyle({
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          fontFamily: FONTS.PRIMARY,
           fontSize: 18,
           fill: COLORS.TEXT,
         }),
@@ -191,7 +191,7 @@ export class ResultScene extends Scene {
       const opponentText = new Text({
         text: opponentValues[index].toString(),
         style: new TextStyle({
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          fontFamily: FONTS.PRIMARY,
           fontSize: 18,
           fill: COLORS.TEXT,
         }),
@@ -239,7 +239,7 @@ export class ResultScene extends Scene {
     const coinHeader = new Text({
       text: '💰 코인 정산',
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 24,
         fontWeight: 'bold',
         fill: COLORS.WARNING,
@@ -262,7 +262,7 @@ export class ResultScene extends Scene {
     const coinText = new Text({
       text: coinMessage,
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 32,
         fontWeight: 'bold',
         fill: isCurrentUserWinner ? COLORS.SUCCESS : COLORS.ERROR,
@@ -277,7 +277,7 @@ export class ResultScene extends Scene {
       const bankruptText = new Text({
         text: '참여 유저의 코인이 모두 소진되어\n더 이상 게임 진행이 불가능합니다.',
         style: new TextStyle({
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          fontFamily: FONTS.PRIMARY,
           fontSize: 18,
           fill: COLORS.ERROR,
           align: 'center',
@@ -306,7 +306,7 @@ export class ResultScene extends Scene {
     const promptText = new Text({
       text: `${this.roundNumber}회차 게임이 종료되었습니다.\n연속으로 게임을 진행할까요?`,
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 20,
         fill: COLORS.TEXT,
         align: 'center',
@@ -344,7 +344,7 @@ export class ResultScene extends Scene {
     this.waitingForConsentText = new Text({
       text: '상대방의 응답을 기다리는 중...',
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 18,
         fill: COLORS.TEXT_MUTED,
       }),
@@ -447,7 +447,7 @@ export class ResultScene extends Scene {
       const declinedText = new Text({
         text: '게임 유저가 동의하지 않아\n현재 게임방은 종료됩니다.',
         style: new TextStyle({
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          fontFamily: FONTS.PRIMARY,
           fontSize: 20,
           fill: COLORS.WARNING,
           align: 'center',

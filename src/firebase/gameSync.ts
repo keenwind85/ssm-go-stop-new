@@ -35,7 +35,14 @@ export class GameSync {
   }
 
   async updateGameState(updates: Partial<GameState>): Promise<void> {
-    await update(this.gameStateRef, updates);
+    console.log('[GameSync] updateGameState called with phase:', updates.phase, 'turn:', updates.currentTurn);
+    try {
+      await update(this.gameStateRef, updates);
+      console.log('[GameSync] updateGameState successful');
+    } catch (error) {
+      console.error('[GameSync] updateGameState failed:', error);
+      throw error;
+    }
   }
 
   async sendAction(action: Omit<GameAction, 'playerId' | 'timestamp'>): Promise<void> {
@@ -97,9 +104,15 @@ export class GameSync {
   }
 
   onGameStateChange(callback: (state: GameState) => void): void {
+    console.log('[GameSync] Setting up onGameStateChange listener for room:', this.roomId);
     const unsubscribe = onValue(this.gameStateRef, (snapshot: DataSnapshot) => {
+      console.log('[GameSync] onGameStateChange triggered, exists:', snapshot.exists());
       if (snapshot.exists()) {
-        callback(snapshot.val() as GameState);
+        const state = snapshot.val() as GameState;
+        console.log('[GameSync] Game state received:', state?.phase, state?.currentTurn);
+        callback(state);
+      } else {
+        console.log('[GameSync] No game state data yet');
       }
     });
 
@@ -157,11 +170,16 @@ export class GameSync {
     await set(collectedRef, collected);
   }
 
-  async endGame(winnerId: string, finalScores: { player: number; opponent: number }): Promise<void> {
+  async endGame(
+    winnerId: string,
+    finalScores: { player: number; opponent: number },
+    winnerScore?: number  // 승자의 최종 점수 (코인 정산용)
+  ): Promise<void> {
     await update(ref(this.database, `${FIREBASE_PATHS.ROOMS}/${this.roomId}`), {
       status: 'finished',
       winner: winnerId,
       finalScores,
+      winnerScore: winnerScore ?? Math.max(finalScores.player, finalScores.opponent),
       endedAt: Date.now(),
     });
   }

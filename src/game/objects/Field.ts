@@ -1,18 +1,41 @@
-import { Container } from 'pixi.js';
+import { Container, Sprite, Texture } from 'pixi.js';
 import { Card } from './Card';
 import { CARD_WIDTH, CARD_HEIGHT } from '@utils/constants';
 import type { CardData } from '@utils/types';
 
 export class Field extends Container {
   private cards: Map<number, Card[]> = new Map();
+  private background: Sprite;
+  private cardContainer: Container;
   private static readonly CARDS_PER_ROW = 8;
   private static readonly CARD_SPACING = 8;
   // Field height constraint - fit within field zone
   private static readonly MAX_ROWS = 2;
   private static readonly ROW_HEIGHT = CARD_HEIGHT + 20;
 
+  // 배경 이미지 크기 (바닥패 영역에 맞게 설정)
+  private static readonly BG_WIDTH = Field.CARDS_PER_ROW * (CARD_WIDTH + Field.CARD_SPACING) + 40;
+  private static readonly BG_HEIGHT = Field.MAX_ROWS * Field.ROW_HEIGHT + 40;
+
   constructor() {
     super();
+
+    // 배경 이미지 추가
+    this.background = new Sprite();
+    try {
+      this.background.texture = Texture.from('field_bg');
+    } catch {
+      console.warn('Field background texture not found');
+    }
+    this.background.anchor.set(0.5);
+    this.background.width = Field.BG_WIDTH;
+    this.background.height = Field.BG_HEIGHT;
+    this.background.alpha = 0.8; // 약간 투명하게
+    this.addChild(this.background);
+
+    // 카드들을 담을 컨테이너 (배경 위에 표시)
+    this.cardContainer = new Container();
+    this.addChild(this.cardContainer);
 
     // Initialize month groups (1-12)
     for (let month = 1; month <= 12; month++) {
@@ -26,7 +49,7 @@ export class Field extends Container {
     monthCards.push(card);
     this.cards.set(month, monthCards);
 
-    this.addChild(card);
+    this.cardContainer.addChild(card);
     this.arrangeCards();
 
     // Setup card selection
@@ -47,7 +70,7 @@ export class Field extends Container {
     if (index !== -1) {
       monthCards.splice(index, 1);
       this.cards.set(month, monthCards);
-      this.removeChild(card);
+      this.cardContainer.removeChild(card);
       this.arrangeCards();
     }
   }
@@ -151,7 +174,7 @@ export class Field extends Container {
   clear(): void {
     this.cards.forEach(monthCards => {
       monthCards.forEach(card => {
-        this.removeChild(card);
+        this.cardContainer.removeChild(card);
       });
     });
 

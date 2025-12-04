@@ -92,9 +92,11 @@ export const SCORING = {
     GO_MULTIPLIER: 2,     // 고 배수
     SHAKE: 2,             // 흔들기
     PPUK: 2,              // 뻑
-    GWANG_BAK: 3,         // 광박
-    MUNG_BAK: 2,          // 멍박
+    GWANG_BAK: 2,         // 광박 (수정: 3→2)
+    MUNG_DDA: 2,          // 멍따: 열끗 7장 이상
+    MUNG_BAK: 2,          // 멍박: 상대 열끗 0장
     PI_BAK: 2,            // 피박
+    GO_BAK: 2,            // 고박: 상대가 고 선언 후 내가 스톱
   },
 } as const;
 
@@ -124,7 +126,7 @@ export const COIN_CONSTANTS = {
 
 // Colors
 export const COLORS = {
-  BACKGROUND: 0x1a1a2e,
+  BACKGROUND: 0x317D49,
   PRIMARY: 0xe94560,
   SECONDARY: 0x16213e,
   TEXT: 0xffffff,
@@ -133,6 +135,12 @@ export const COLORS = {
   WARNING: 0xfbbf24,
   ERROR: 0xef4444,
   CARD_HIGHLIGHT: 0xffd700,
+} as const;
+
+// Fonts
+export const FONTS = {
+  // prettier-ignore
+  PRIMARY: `'Noto Sans KR', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`,
 } as const;
 
 // Z-index layers

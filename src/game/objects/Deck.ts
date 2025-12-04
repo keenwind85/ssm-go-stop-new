@@ -1,6 +1,6 @@
 import { Container, Graphics, Text, TextStyle, Sprite, Texture } from 'pixi.js';
 import { Card } from './Card';
-import { CARD_WIDTH, CARD_HEIGHT, COLORS } from '@utils/constants';
+import { CARD_WIDTH, CARD_HEIGHT, COLORS, FONTS } from '@utils/constants';
 import { CardData, CardType } from '@utils/types';
 import { shuffleArray } from '@utils/helpers';
 
@@ -108,7 +108,7 @@ export class Deck extends Container {
     this.countText = new Text({
       text: '48',
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 18,
         fontWeight: 'bold',
         fill: COLORS.TEXT,

@@ -1,6 +1,6 @@
 import { Application, Graphics, Text, TextStyle } from 'pixi.js';
 import { Scene } from './Scene';
-import { GAME_WIDTH, GAME_HEIGHT, COLORS } from '@utils/constants';
+import { GAME_WIDTH, GAME_HEIGHT, COLORS, FONTS } from '@utils/constants';
 
 export class LoadingScene extends Scene {
   private progressBar: Graphics;
@@ -13,7 +13,7 @@ export class LoadingScene extends Scene {
     this.progressText = new Text({
       text: '0%',
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 24,
         fill: COLORS.TEXT,
       }),
@@ -29,9 +29,9 @@ export class LoadingScene extends Scene {
 
     // Title
     const title = new Text({
-      text: '고스톱',
+      text: '순시미 맞고',
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 48,
         fontWeight: 'bold',
         fill: COLORS.PRIMARY,

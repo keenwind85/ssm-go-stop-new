@@ -1,4 +1,5 @@
 import { Application, Assets } from 'pixi.js';
+import gsap from 'gsap';
 import { GAME_WIDTH, GAME_HEIGHT, COLORS } from '@utils/constants';
 import { SceneManager } from './scenes/SceneManager';
 import { LoadingScene } from './scenes/LoadingScene';
@@ -73,6 +74,10 @@ export class Game {
       // UI assets will be added here
     });
 
+    Assets.addBundle('backgrounds', {
+      'field_bg': '/assets/etc/badak.png'
+    });
+
     Assets.addBundle('sounds', {
       // Sound assets will be added here
     });
@@ -83,6 +88,14 @@ export class Game {
       console.log('Card assets loaded successfully');
     } catch (error) {
       console.warn('Some card assets not found:', error);
+    }
+
+    // Load background assets
+    try {
+      await Assets.loadBundle('backgrounds');
+      console.log('Background assets loaded successfully');
+    } catch (error) {
+      console.warn('Background assets not found:', error);
     }
   }
 
@@ -96,6 +109,33 @@ export class Game {
   pause(): void {
     if (!this.isRunning) return;
 
+    // Check if we're in a multiplayer game
+    const currentSceneName = this.sceneManager.getCurrentSceneName();
+    const isInGame = currentSceneName === 'game';
+
+    if (isInGame) {
+      const gameScene = this.sceneManager.getCurrentScene() as GameScene;
+      const roomId = gameScene?.getRoomId?.();
+
+      // For multiplayer games, complete all animations immediately instead of pausing
+      // This prevents animation state desync when screen is hidden/shown
+      if (roomId) {
+        // Complete all active GSAP animations immediately
+        // This ensures card positions reach their final state before screen is hidden
+        const children = gsap.globalTimeline.getChildren(true, true, true);
+        children.forEach((tween) => {
+          if (tween.progress && typeof tween.progress === 'function') {
+            tween.progress(1);
+          }
+        });
+        // Don't stop ticker in multiplayer - Firebase listeners need to continue
+        this.isRunning = false;
+        return;
+      }
+    }
+
+    // For single player (AI) mode, pause normally
+    gsap.globalTimeline.pause();
     this.app.ticker.stop();
     this.isRunning = false;
   }
@@ -104,6 +144,8 @@ export class Game {
     if (this.isRunning) return;
 
     this.app.ticker.start();
+    // Resume GSAP animations (for single player mode)
+    gsap.globalTimeline.resume();
     this.isRunning = true;
   }
 

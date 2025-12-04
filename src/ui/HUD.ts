@@ -1,6 +1,6 @@
 import { Container, Graphics, Text, TextStyle } from 'pixi.js';
 import gsap from 'gsap';
-import { GAME_WIDTH, COLORS, LAYOUT } from '@utils/constants';
+import { GAME_WIDTH, COLORS, LAYOUT, FONTS } from '@utils/constants';
 
 const TURN_TIMEOUT = 30; // 30 seconds per turn
 
@@ -62,7 +62,7 @@ export class HUD extends Container {
     const turnText = new Text({
       text: isPlayer ? '내 차례' : '상대 차례',
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 20,
         fontWeight: 'bold',
         fill: COLORS.TEXT,
@@ -84,7 +84,7 @@ export class HUD extends Container {
     const timerText = new Text({
       text: '30',
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 18,
         fontWeight: 'bold',
         fill: COLORS.TEXT,
@@ -112,7 +112,7 @@ export class HUD extends Container {
     this.notificationText = new Text({
       text: '',
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 18,
         fontWeight: 'bold',
         fill: COLORS.WARNING,

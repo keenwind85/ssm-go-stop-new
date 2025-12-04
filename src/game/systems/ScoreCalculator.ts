@@ -41,6 +41,9 @@ export class ScoreCalculator {
         ppuk: 1,
         piBak: 1,
         gwangBak: 1,
+        mungDda: 1,
+        mungBak: 1,
+        goBak: 1,
       },
       total: baseTotal + specialBonus,
     };
@@ -114,8 +117,9 @@ export class ScoreCalculator {
     // Count pi points (some cards are worth 2)
     let piCount = 0;
     piCards.forEach(card => {
-      // 11월 4번, 12월 4번 카드는 쌍피 (2점)
-      if ((card.getMonth() === 11 && card.cardData.index === 4) ||
+      // 9월 4번(국진이), 11월 4번, 12월 4번 카드는 쌍피 (2점)
+      if ((card.getMonth() === 9 && card.cardData.index === 4) ||
+          (card.getMonth() === 11 && card.cardData.index === 4) ||
           (card.getMonth() === 12 && card.cardData.index === 4)) {
         piCount += 2;
       } else {
@@ -148,28 +152,55 @@ export class ScoreCalculator {
   // Apply multipliers for Go count, shake, etc.
   // opponentPiCount: 상대방의 피 점수 (피박 계산용)
   // opponentKwangCount: 상대방의 광 개수 (광박 계산용)
+  // opponentAnimalCount: 상대방의 열끗 개수 (멍박 계산용)
+  // myAnimalCount: 내 열끗 개수 (멍따 계산용)
+  // opponentGoCount: 상대방의 고 횟수 (고박 계산용)
   applyMultipliers(
     baseScore: ScoreBreakdown,
     goCount: number,
     hasShake: boolean,
     hasPpuk: boolean,
     opponentPiCount: number = 10, // 기본값: 피박 아님
-    opponentKwangCount: number = 1 // 기본값: 광박 아님
+    opponentKwangCount: number = 1, // 기본값: 광박 아님
+    opponentAnimalCount: number = 1, // 기본값: 멍박 아님
+    myAnimalCount: number = 0, // 기본값: 멍따 아님
+    opponentGoCount: number = 0 // 기본값: 고박 아님
   ): ScoreBreakdown {
     // 피박: 상대방이 피를 10점 미만 먹었을 때
     const hasPiBak = opponentPiCount < 10;
     // 광박: 상대방이 광을 하나도 못 먹었을 때
     const hasGwangBak = opponentKwangCount === 0;
+    // 멍박: 상대방이 열끗을 하나도 못 먹었을 때
+    const hasMungBak = opponentAnimalCount === 0;
+    // 멍따: 내가 열끗을 7장 이상 먹었을 때
+    const hasMungDda = myAnimalCount >= 7;
+    // 고박: 상대방이 고를 선언했는데 내가 스톱해서 이긴 경우
+    const hasGoBak = opponentGoCount > 0;
+
+    // 고 배수 계산: 1고=x2, 2고=x3, 3고부터 지수 증가 (3고=x4, 4고=x8, 5고=x16...)
+    let goMultiplier = 1;
+    if (goCount === 1) {
+      goMultiplier = 2;
+    } else if (goCount === 2) {
+      goMultiplier = 3;
+    } else if (goCount >= 3) {
+      // 3고부터는 2^(goCount-1) = 3고:4, 4고:8, 5고:16...
+      goMultiplier = Math.pow(2, goCount - 1);
+    }
 
     const multipliers = {
-      go: 1 + goCount, // 고 배수: 선형 (1고 = x2, 2고 = x3, ...)
+      go: goMultiplier,
       shake: hasShake ? SCORING.SPECIAL.SHAKE : 1,
       ppuk: hasPpuk ? SCORING.SPECIAL.PPUK : 1,
       piBak: hasPiBak ? SCORING.SPECIAL.PI_BAK : 1,
       gwangBak: hasGwangBak ? SCORING.SPECIAL.GWANG_BAK : 1,
+      mungDda: hasMungDda ? SCORING.SPECIAL.MUNG_DDA : 1,
+      mungBak: hasMungBak ? SCORING.SPECIAL.MUNG_BAK : 1,
+      goBak: hasGoBak ? SCORING.SPECIAL.GO_BAK : 1,
     };
 
-    const totalMultiplier = multipliers.go * multipliers.shake * multipliers.ppuk * multipliers.piBak * multipliers.gwangBak;
+    const totalMultiplier = multipliers.go * multipliers.shake * multipliers.ppuk *
+      multipliers.piBak * multipliers.gwangBak * multipliers.mungDda * multipliers.mungBak * multipliers.goBak;
 
     return {
       ...baseScore,

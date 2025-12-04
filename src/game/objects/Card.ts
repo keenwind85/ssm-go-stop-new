@@ -1,4 +1,4 @@
-import { Sprite, Texture, Graphics, Text, TextStyle } from 'pixi.js';
+import { Sprite, Texture, Graphics, Text, TextStyle, Container } from 'pixi.js';
 import gsap from 'gsap';
 import { CARD_WIDTH, CARD_HEIGHT, COLORS, ANIMATION_DURATION } from '@utils/constants';
 import { CardType, CardData } from '@utils/types';
@@ -246,42 +246,65 @@ export class Card extends Sprite {
   }
 
   // 카드 매칭 애니메이션 (바닥패와 합쳐지는 효과)
-  async matchWithCard(targetCard: Card): Promise<void> {
-    if (!this.parent) return;
+  // animationLayer를 전달받아 전역 좌표계에서 애니메이션 수행
+  // startGlobalPos: 카드가 부모에서 제거되기 전의 전역 위치 (선택적)
+  async matchWithCard(targetCard: Card, animationLayer?: Container, startGlobalPos?: { x: number; y: number }): Promise<void> {
+    console.log('[Card] matchWithCard called:', {
+      cardId: this.cardData.id,
+      targetCardId: targetCard.cardData.id,
+      hasAnimationLayer: !!animationLayer,
+      startGlobalPos,
+      hasParent: !!this.parent,
+    });
 
-    // Get target card's global position
+    // 타겟 카드의 전역 위치 저장 (컨테이너 이동 전에)
     const targetGlobalPos = targetCard.getGlobalPosition();
+    console.log('[Card] targetGlobalPos:', targetGlobalPos);
 
-    // Convert to this card's parent local coordinates
-    const targetLocalPos = this.parent.toLocal(targetGlobalPos);
+    // 애니메이션 레이어가 제공되면 해당 레이어로 카드 이동
+    if (animationLayer) {
+      // 현재 카드의 전역 위치 (전달받은 위치가 있으면 사용, 없으면 현재 위치)
+      const myGlobalPos = startGlobalPos ?? this.getGlobalPosition();
+      console.log('[Card] myGlobalPos:', myGlobalPos);
 
-    // Increase z-index to show card on top during match
+      // 기존 부모에서 제거 (있는 경우)
+      if (this.parent) {
+        this.parent.removeChild(this);
+      }
+
+      // 애니메이션 레이어에 추가
+      animationLayer.addChild(this);
+
+      // 전역 위치를 애니메이션 레이어의 로컬 좌표로 변환하여 설정
+      const myLocalPos = animationLayer.toLocal(myGlobalPos);
+      console.log('[Card] myLocalPos (in animationLayer):', myLocalPos);
+      this.position.set(myLocalPos.x, myLocalPos.y);
+    } else if (!this.parent) {
+      // 애니메이션 레이어도 없고 부모도 없으면 리턴
+      console.log('[Card] No animationLayer and no parent, returning early');
+      return;
+    }
+
+    // 타겟 위치를 현재 부모(animationLayer 또는 기존 부모)의 로컬 좌표로 변환
+    const targetLocalPos = this.parent!.toLocal(targetGlobalPos);
+
+    // z-index 설정
     const originalZIndex = this.zIndex;
     this.zIndex = 1000;
 
-    // Animate to exact target position for clear overlap effect
+    // 타겟 위치로 이동하여 겹치는 효과 (실제 맞고처럼)
     await gsap.to(this, {
       x: targetLocalPos.x,
       y: targetLocalPos.y,
-      scale: 1.05,
       rotation: 0,
       duration: ANIMATION_DURATION.CARD_MOVE * 0.8,
       ease: 'power2.out',
     });
 
-    // Hold the overlap state longer for realistic matching effect
-    await new Promise(resolve => setTimeout(resolve, 300));
+    // 겹친 상태 유지 (실제 맞고에서 패를 겹쳐놓는 효과)
+    await new Promise(resolve => setTimeout(resolve, 350));
 
-    // Scale back and flash effect
-    await gsap.to(this, {
-      scale: 1.0,
-      alpha: 0.8,
-      duration: 0.15,
-      yoyo: true,
-      repeat: 1,
-    });
-
-    // Restore original z-index
+    // z-index 복원
     this.zIndex = originalZIndex;
   }
 
@@ -291,5 +314,85 @@ export class Card extends Sprite {
 
   setOriginalY(y: number): void {
     this.originalY = y;
+  }
+
+  // 카드 앞면 표시 (뒤집힌 상태에서 복원)
+  showFront(): void {
+    const textureName = `card_${this.cardData.month.toString().padStart(2, '0')}_${this.cardData.index}`;
+    try {
+      this.texture = Texture.from(textureName);
+    } catch {
+      console.warn(`Texture not found: ${textureName}`);
+      this.texture = Texture.WHITE;
+    }
+  }
+
+  // 카드 뒷면 표시
+  showBack(): void {
+    try {
+      this.texture = Texture.from('card_back');
+    } catch {
+      this.texture = Texture.WHITE;
+    }
+  }
+
+  // 애니메이션 전용 복제 카드 생성 (상태 변경 없이 시각적 효과만)
+  // 이벤트 비활성화되어 있고 애니메이션 후 자동 제거됨
+  createAnimationClone(): Card {
+    const clone = new Card(this.cardData);
+    clone.position.copyFrom(this.position);
+    clone.scale.copyFrom(this.scale);
+    clone.rotation = this.rotation;
+    clone.alpha = this.alpha;
+    clone.eventMode = 'none'; // 이벤트 비활성화
+    clone.cursor = 'default';
+    return clone;
+  }
+
+  // 애니메이션 후 자동 제거 (복제 카드용)
+  async animateAndDestroy(targetX: number, targetY: number, duration = ANIMATION_DURATION.CARD_MOVE): Promise<void> {
+    await gsap.to(this, {
+      x: targetX,
+      y: targetY,
+      duration,
+      ease: 'power2.out',
+    });
+    if (this.parent) {
+      this.parent.removeChild(this);
+    }
+    this.destroy();
+  }
+
+  // 매칭 애니메이션 후 자동 제거 (복제 카드용)
+  async matchAnimationAndDestroy(targetCard: Card, animationLayer: Container, startGlobalPos: { x: number; y: number }): Promise<void> {
+    const targetGlobalPos = targetCard.getGlobalPosition();
+
+    // 애니메이션 레이어에 추가
+    animationLayer.addChild(this);
+
+    // 전역 위치를 애니메이션 레이어의 로컬 좌표로 변환
+    const myLocalPos = animationLayer.toLocal(startGlobalPos);
+    this.position.set(myLocalPos.x, myLocalPos.y);
+
+    // 타겟 위치를 로컬 좌표로 변환
+    const targetLocalPos = animationLayer.toLocal(targetGlobalPos);
+
+    this.zIndex = 1000;
+
+    await gsap.to(this, {
+      x: targetLocalPos.x,
+      y: targetLocalPos.y,
+      rotation: 0,
+      duration: ANIMATION_DURATION.CARD_MOVE * 0.8,
+      ease: 'power2.out',
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 350));
+
+    // 애니메이션 완료 후 제거
+    if (this.parent) {
+      this.parent.removeChild(this);
+    }
+    this.destroy();
   }
 }

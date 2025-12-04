@@ -1,6 +1,6 @@
 import { Container, Graphics, Text, TextStyle, Sprite, Texture, Ticker } from 'pixi.js';
 import { Card } from './Card';
-import { COLORS } from '@utils/constants';
+import { COLORS, FONTS } from '@utils/constants';
 import { CardType, CardData } from '@utils/types';
 
 interface CollectedCardGroup {
@@ -55,7 +55,7 @@ export class CollectedCardsDisplay extends Container {
     this.nameLabel = new Text({
       text: isPlayer ? '나의 점수패' : '상대 점수패',
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 14,
         fontWeight: 'bold',
         fill: isPlayer ? COLORS.PRIMARY : COLORS.WARNING,
@@ -72,7 +72,7 @@ export class CollectedCardsDisplay extends Container {
     this.totalScoreText = new Text({
       text: '0점',
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 18,
         fontWeight: 'bold',
         fill: COLORS.TEXT,
@@ -120,7 +120,7 @@ export class CollectedCardsDisplay extends Container {
     const labelText = new Text({
       text: label,
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 12,
         fontWeight: 'bold',
         fill: COLORS.TEXT_MUTED,
@@ -147,7 +147,7 @@ export class CollectedCardsDisplay extends Container {
     const countText = new Text({
       text: '0',
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 12,
         fontWeight: 'bold',
         fill: COLORS.TEXT,

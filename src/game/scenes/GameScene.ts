@@ -1,6 +1,6 @@
 import { Application, Graphics, Container, Ticker, Text, TextStyle } from 'pixi.js';
 import { Scene } from './Scene';
-import { GAME_WIDTH, GAME_HEIGHT, COLORS, POSITIONS, LAYERS, LAYOUT, FIREBASE_PATHS } from '@utils/constants';
+import { GAME_WIDTH, GAME_HEIGHT, COLORS, POSITIONS, LAYERS, LAYOUT, FIREBASE_PATHS, FONTS } from '@utils/constants';
 import { Deck } from '@game/objects/Deck';
 import { Field } from '@game/objects/Field';
 import { Hand } from '@game/objects/Hand';
@@ -13,7 +13,7 @@ import { getCurrentUserId, getUserProfile } from '@fb/auth';
 import { getRealtimeDatabase } from '@fb/config';
 import { ref, get, onValue, update } from 'firebase/database';
 import { GameSync } from '@fb/gameSync';
-import type { GameState, RoomData, CardData, PlayerState, RoomJoinRequest } from '@utils/types';
+import type { GameState, RoomData, CardData, PlayerState, RoomJoinRequest, ScoreBreakdown } from '@utils/types';
 import { Button } from '@ui/Button';
 
 interface GameSceneData {
@@ -62,6 +62,9 @@ export class GameScene extends Scene {
   private activeJoinRequestId: string | null = null;
   private hasInitializedMultiplayerSystems = false;
   private lastReceivedGameState: GameState | null = null;
+  // 애니메이션 진행 중 상태 동기화 방지용
+  private isAnimatingCard = false;
+  private pendingStateUpdate: GameState | null = null;
 
   constructor(app: Application) {
     super(app);
@@ -226,6 +229,7 @@ export class GameScene extends Scene {
       scoreCalculator: this.scoreCalculator,
       isAIMode,
       firstTurn,
+      animationLayer: this.animationLayer,
     });
 
     this.setupEventHandlers();
@@ -265,6 +269,7 @@ export class GameScene extends Scene {
 
     const role: 'host' | 'guest' = room.host === currentUserId ? 'host' : 'guest';
     this.multiplayerRole = role;
+    console.log(`[${role}] Initializing multiplayer flow, roomId:`, this.roomId, 'roomStatus:', room.status);
     this.gameSync = new GameSync(this.roomId);
 
     const hostProfile = await getUserProfile(room.host);
@@ -314,9 +319,12 @@ export class GameScene extends Scene {
 
     // Player card selection
     this.playerHand.on('cardSelected', (card) => {
+      console.log('[GameScene] cardSelected received, isPlayerTurn:', turnManager.isPlayerTurn(), 'phase:', turnManager.getPhase());
       if (turnManager.isPlayerTurn()) {
         this.field.clearAllHighlights();
         turnManager.handleCardPlay(card);
+      } else {
+        console.log('[GameScene] Not player turn, ignoring card selection');
       }
     });
 
@@ -370,10 +378,17 @@ export class GameScene extends Scene {
             loserId = 'draw';
           }
 
+          // result.playerScore와 opponentScore는 숫자임 (ScoreBreakdown은 playerScoreBreakdown)
+          const playerFinalScore = result.playerScoreBreakdown?.total ?? result.playerScore ?? 0;
+          const opponentFinalScore = result.opponentScoreBreakdown?.total ?? result.opponentScore ?? 0;
+
+          // 승자 점수 계산 (코인 정산용)
+          const winnerScore = result.winner === 'player' ? playerFinalScore : opponentFinalScore;
+
           await this.gameSync.endGame(winnerId, {
-            player: result.playerScore?.total ?? 0,
-            opponent: result.opponentScore?.total ?? 0,
-          });
+            player: playerFinalScore,
+            opponent: opponentFinalScore,
+          }, winnerScore);
 
           // Get current room data for round number
           const db = getRealtimeDatabase();
@@ -426,6 +441,22 @@ export class GameScene extends Scene {
       this.hud.startTimer();
     });
 
+    // Hand card selection (2-match from hand) - 호스트 플레이어 자신
+    turnManager.on('requireFieldSelection', (matchingCards: Card[]) => {
+      this.hud.showNotification('손패로 바닥패를 선택하세요');
+      matchingCards.forEach(card => {
+        card.setMatchHighlight(true);
+      });
+    });
+
+    // Hand card selection (2-match from hand) - 게스트 플레이어 (호스트 화면에서)
+    turnManager.on('requireOpponentFieldSelection', (matchingCards: Card[]) => {
+      this.hud.showNotification('상대가 바닥패를 선택 중...');
+      matchingCards.forEach(card => {
+        card.setMatchHighlight(true);
+      });
+    });
+
     // Deck card selection (2-match from deck)
     turnManager.on('requireDeckSelection', (data: { card: Card; matchingCards: Card[] }) => {
       this.hud.showNotification('뒷패로 바닥패를 선택하세요');
@@ -434,12 +465,13 @@ export class GameScene extends Scene {
       });
     });
 
-    // Field card selected for deck matching
+    // Field card selected for hand/deck matching (호스트 측)
     this.field.on('cardSelected', async (card) => {
       if (turnManager.isWaitingForDeckSelection()) {
         this.field.clearAllHighlights();
         await turnManager.handleDeckCardSelection(card);
       } else if (turnManager.isWaitingForFieldSelection()) {
+        this.field.clearAllHighlights();
         turnManager.handleFieldCardSelection(card);
       }
     });
@@ -521,7 +553,7 @@ export class GameScene extends Scene {
     const title = new Text({
       text: '고/스톱',
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 32,
         fontWeight: 'bold',
         fill: COLORS.TEXT,
@@ -535,7 +567,7 @@ export class GameScene extends Scene {
     const scoreText = new Text({
       text: `현재 점수: ${score}점 ${goCount > 0 ? `(${goCount}고)` : ''}`,
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 20,
         fill: COLORS.TEXT,
       }),
@@ -559,7 +591,7 @@ export class GameScene extends Scene {
     const goText = new Text({
       text: '고',
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 24,
         fontWeight: 'bold',
         fill: COLORS.TEXT,
@@ -584,7 +616,7 @@ export class GameScene extends Scene {
     const stopText = new Text({
       text: '스톱',
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 24,
         fontWeight: 'bold',
         fill: COLORS.TEXT,
@@ -619,10 +651,14 @@ export class GameScene extends Scene {
     if (!this.turnManager || !this.gameSync || !this.multiplayerPlayers) return;
 
     const snapshot = this.buildGameStateSnapshot();
+    console.log('[Host] Broadcasting game state:', snapshot.phase, snapshot.currentTurn,
+      'playerHand:', snapshot.player.hand.length, 'opponentHand:', snapshot.opponent.hand.length,
+      'deckCount:', snapshot.deck.length, 'selectionContext:', !!snapshot.selectionContext);
     try {
       await this.gameSync.updateGameState(snapshot);
+      console.log('[Host] Game state broadcast successful');
     } catch (error) {
-      console.warn('Failed to sync game state', error);
+      console.error('[Host] Failed to sync game state', error);
     }
   }
 
@@ -655,6 +691,21 @@ export class GameScene extends Scene {
       goCount: this.turnManager?.getGoCount('opponent') ?? 0,
     };
 
+    // selectionContext 생성 (2장 매칭 시 선택 필요한 경우)
+    const selectionCtx = this.turnManager?.getSelectionContext();
+    let selectionContextData: GameState['selectionContext'] = undefined;
+
+    if (selectionCtx) {
+      selectionContextData = {
+        type: selectionCtx.type,
+        options: selectionCtx.options.map(card => card.cardData),
+        playedCard: selectionCtx.playedCard.cardData,
+        requiredFor: selectionCtx.requiredFor,
+      };
+    }
+
+    // Firebase rejects undefined but accepts null for deletion
+    // Use null to clear selectionContext when not needed
     return {
       phase: this.turnManager?.getPhase() ?? 'waiting',
       currentTurn: this.turnManager?.getCurrentTurn() ?? 'player',
@@ -663,6 +714,7 @@ export class GameScene extends Scene {
       deck: this.deck.getRemainingCardData(),
       player: playerState,
       opponent: opponentState,
+      selectionContext: selectionContextData ?? null,
     };
   }
 
@@ -682,9 +734,12 @@ export class GameScene extends Scene {
   }
 
   private setupGuestView(): void {
-    if (!this.gameSync) return;
+    if (!this.gameSync) {
+      console.error('[Guest] gameSync is null in setupGuestView, cannot proceed');
+      return;
+    }
 
-    console.log('[Guest] Setting up guest view');
+    console.log('[Guest] Setting up guest view, gameSync exists for room:', this.roomId);
 
     // 게스트용 이벤트 핸들러 먼저 설정 (호스트에게 액션 전달)
     // 상태 변경보다 먼저 설정해야 카드가 생성될 때 이벤트가 제대로 연결됨
@@ -700,6 +755,14 @@ export class GameScene extends Scene {
         console.log('[Guest] Hiding waiting overlay, destroying it completely');
         this.destroyWaitingOverlay();
       }
+
+      // 애니메이션 진행 중이면 상태 업데이트 보류
+      if (this.isAnimatingCard) {
+        console.log('[Guest] Animation in progress, deferring state update');
+        this.pendingStateUpdate = state;
+        return;
+      }
+
       this.applyRemoteState(state);
     });
   }
@@ -710,8 +773,9 @@ export class GameScene extends Scene {
 
     console.log('[Guest] Setting up guest event handlers for playerHand');
 
-    // 플레이어(게스트) 카드 선택 - 호스트에게 전달
-    this.playerHand.on('cardSelected', (card: Card) => {
+    // 플레이어(게스트) 카드 선택 - 호스트에게 전달 + 복제 카드로 애니메이션 실행
+    // 중요: 실제 카드 상태는 변경하지 않음! applyRemoteState에서만 상태 변경
+    this.playerHand.on('cardSelected', async (card: Card) => {
       console.log('[Guest] playerHand cardSelected event received:', card.cardData.id);
       if (!this.gameSync) {
         console.warn('[Guest] gameSync is null, cannot send action');
@@ -730,17 +794,57 @@ export class GameScene extends Scene {
         return;
       }
 
-      // 호스트에게 카드 플레이 액션 전달
-      console.log('[Guest] Sending PLAY_CARD action to Firebase:', card.cardData.id, 'month:', card.getMonth());
-      this.gameSync.playCard(card.cardData.id, {
+      // 애니메이션 락 설정
+      this.isAnimatingCard = true;
+
+      // 복제 카드 생성 (실제 카드는 건드리지 않음!)
+      const cardGlobalPos = card.getGlobalPosition();
+      const animClone = card.createAnimationClone();
+      animClone.showFront();
+
+      // 실제 카드를 즉시 숨김 (applyRemoteState가 나중에 처리)
+      card.visible = false;
+
+      // 매칭 카드 확인
+      const matchingCards = this.field.getMatchingCards(card.getMonth());
+
+      // Firebase에 전송 (애니메이션과 병렬로)
+      const sendPromise = this.gameSync.playCard(card.cardData.id, {
         targetMonth: card.getMonth(),
-      }).then(() => {
+      });
+
+      // 복제 카드로 애니메이션 실행 후 자동 제거
+      if (matchingCards.length === 0 || matchingCards.length === 3) {
+        // 매칭 없거나 뻑 - 바닥으로 이동
+        const fieldPos = this.field.getGlobalPosition();
+        this.animationLayer.addChild(animClone);
+        const localPos = this.animationLayer.toLocal(cardGlobalPos);
+        animClone.position.set(localPos.x, localPos.y);
+        await animClone.animateAndDestroy(fieldPos.x, fieldPos.y);
+      } else {
+        // 매칭 - 첫 번째 카드와 애니메이션
+        await animClone.matchAnimationAndDestroy(matchingCards[0], this.animationLayer, cardGlobalPos);
+      }
+
+      // 애니메이션 완료 후 락 해제 및 보류된 상태 적용
+      this.isAnimatingCard = false;
+      if (this.pendingStateUpdate) {
+        console.log('[Guest] Applying deferred state update after animation');
+        const pendingState = this.pendingStateUpdate;
+        this.pendingStateUpdate = null;
+        this.applyRemoteState(pendingState);
+      }
+
+      // Firebase 전송 결과 확인
+      sendPromise.then(() => {
         console.log('[Guest] PLAY_CARD action sent successfully');
       }).catch((error) => {
         console.error('[Guest] Failed to send PLAY_CARD action:', error);
         if (this.hud) {
           this.hud.showNotification('카드를 낼 수 없습니다.');
         }
+        // 전송 실패 시 카드 다시 표시
+        card.visible = true;
       });
     });
 
@@ -761,7 +865,55 @@ export class GameScene extends Scene {
         return;
       }
 
-      // 턴 체크 - 내 턴이 아니면 알림 표시
+      // selectionContext가 있고, 내가 선택해야 하는 상황인지 체크
+      const state = this.lastReceivedGameState;
+      if (!state) {
+        console.warn('[Guest] No game state available');
+        return;
+      }
+
+      const currentUserId = getCurrentUserId();
+      const isLocalHost = this.multiplayerPlayers && currentUserId === this.multiplayerPlayers.host.id;
+
+      // selectionContext가 있으면 2장 매칭 선택 상황
+      if (state.selectionContext) {
+        // requiredFor가 opponent면 게스트가 선택해야 함 (호스트 관점)
+        const needsMySelection = isLocalHost
+          ? state.selectionContext.requiredFor === 'player'
+          : state.selectionContext.requiredFor === 'opponent';
+
+        if (!needsMySelection) {
+          console.warn('[Guest] Selection is not required for me');
+          if (this.hud) {
+            this.hud.showNotification('상대방이 선택 중입니다.');
+          }
+          return;
+        }
+
+        // 선택 가능한 카드인지 확인
+        const isValidSelection = state.selectionContext.options.some(opt => opt.id === card.cardData.id);
+        if (!isValidSelection) {
+          console.warn('[Guest] Selected card is not in valid options');
+          if (this.hud) {
+            this.hud.showNotification('선택할 수 없는 카드입니다.');
+          }
+          return;
+        }
+
+        console.log('[Guest] Valid field selection, sending to Firebase');
+        this.field.clearAllHighlights();
+        this.gameSync.selectFieldCard(card.cardData.id).then(() => {
+          console.log('[Guest] SELECT_FIELD_CARD action sent successfully');
+        }).catch((error) => {
+          console.error('[Guest] Failed to send SELECT_FIELD_CARD action:', error);
+          if (this.hud) {
+            this.hud.showNotification('필드 카드를 선택할 수 없습니다.');
+          }
+        });
+        return;
+      }
+
+      // selectionContext가 없는 경우 기존 로직 (일반 턴 체크)
       if (!this.isMyTurn()) {
         console.warn('[Guest] Not my turn for field selection, showing notification');
         if (this.hud) {
@@ -782,20 +934,73 @@ export class GameScene extends Scene {
     });
 
     console.log('[Guest] Event handlers setup complete');
+
+    // 호스트의 카드 플레이 액션을 받아서 복제 카드로 애니메이션 실행
+    // 중요: 실제 카드 상태는 변경하지 않음! applyRemoteState에서만 상태 변경
+    this.gameSync.onOpponentAction(async (action) => {
+      console.log('[Guest] Received host action:', action.type, action);
+
+      if (action.type === 'PLAY_CARD') {
+        // 호스트가 플레이한 카드 = 게스트 화면에서 opponentHand의 카드
+        const card = this.opponentHand.getCards().find(c => c.cardData.id === action.cardId);
+        if (card) {
+          // 애니메이션 락 설정
+          this.isAnimatingCard = true;
+
+          console.log('[Guest] Playing animation for host card:', action.cardId);
+          const cardGlobalPos = card.getGlobalPosition();
+
+          // 복제 카드 생성 (실제 카드는 건드리지 않음!)
+          const animClone = card.createAnimationClone();
+          animClone.showFront();
+
+          // 실제 카드를 즉시 숨김 (applyRemoteState가 나중에 처리)
+          card.visible = false;
+
+          // 매칭 카드 확인
+          const matchingCards = this.field.getMatchingCards(card.getMonth());
+
+          // 복제 카드로 애니메이션 실행 후 자동 제거
+          if (matchingCards.length === 0 || matchingCards.length === 3) {
+            // 매칭 없거나 뻑 - 바닥으로 이동
+            const fieldPos = this.field.getGlobalPosition();
+            this.animationLayer.addChild(animClone);
+            const localPos = this.animationLayer.toLocal(cardGlobalPos);
+            animClone.position.set(localPos.x, localPos.y);
+            await animClone.animateAndDestroy(fieldPos.x, fieldPos.y);
+          } else {
+            // 매칭 - 첫 번째 카드와 애니메이션
+            await animClone.matchAnimationAndDestroy(matchingCards[0], this.animationLayer, cardGlobalPos);
+          }
+
+          // 애니메이션 완료 후 락 해제 및 보류된 상태 적용
+          this.isAnimatingCard = false;
+          if (this.pendingStateUpdate) {
+            console.log('[Guest] Applying deferred state update after host animation');
+            const pendingState = this.pendingStateUpdate;
+            this.pendingStateUpdate = null;
+            this.applyRemoteState(pendingState);
+          }
+        }
+      }
+    });
   }
 
   private attachRoomListener(): void {
     if (!this.roomId) return;
+    console.log(`[${this.multiplayerRole}] Attaching room listener for room:`, this.roomId);
     const db = getRealtimeDatabase();
     const roomRef = ref(db, `${FIREBASE_PATHS.ROOMS}/${this.roomId}`);
     this.roomWatcherUnsubscribe?.();
     this.roomWatcherUnsubscribe = onValue(roomRef, (snapshot) => {
+      console.log(`[${this.multiplayerRole}] Room update received, exists:`, snapshot.exists());
       if (!snapshot.exists()) {
         this.handleRoomClosed();
         return;
       }
 
       const room = snapshot.val() as RoomData;
+      console.log(`[${this.multiplayerRole}] Room status:`, room.status, 'hasGameState:', !!room.gameState);
       if (this.multiplayerRole === 'host') {
         this.handleHostRoomUpdate(room);
       } else if (this.multiplayerRole === 'guest') {
@@ -849,8 +1054,69 @@ export class GameScene extends Scene {
 
     if (wasKickedOrLeft || gameEnded || hostCancelled) {
       if (this.hud) {
-        if (gameEnded) {
-          // Game ended normally - handled by gameEnd event
+        if (gameEnded && this.multiplayerPlayers) {
+          // 게스트가 게임 종료 시 결과 화면으로 이동
+          // lastGameState에서 점수 정보를 가져옴
+          const gameState = this.lastReceivedGameState;
+
+          // 확장된 room 타입 (endGame에서 저장한 추가 필드들)
+          const extendedRoom = room as RoomData & {
+            winner?: string;
+            winnerScore?: number;
+            finalScores?: { player: number; opponent: number };
+          };
+
+          // 호스트 관점에서 winner 결정 (room.winner는 winnerId)
+          const winnerId = extendedRoom.winner;
+          const isHostWinner = winnerId === this.multiplayerPlayers.host.id;
+
+          // 게스트 관점에서의 winner: 게스트가 이기면 'player', 지면 'opponent'
+          const localWinner = isHostWinner ? 'opponent' : 'player';
+
+          // Firebase에서 저장된 점수 가져오기 (finalScores: player=호스트, opponent=게스트)
+          // 게스트 관점에서 매핑 (자신이 player)
+          const playerScore = extendedRoom.finalScores?.opponent ?? gameState?.opponent?.score ?? 0;
+          const opponentScore = extendedRoom.finalScores?.player ?? gameState?.player?.score ?? 0;
+
+          // 승자의 최종 점수 (코인 정산용)
+          const winnerScoreFromRoom = extendedRoom.winnerScore ?? Math.max(playerScore, opponentScore);
+
+          const guestResult = {
+            winner: localWinner,
+            playerScore,
+            opponentScore,
+            playerCollected: {
+              kwang: gameState?.opponent?.collected?.kwang?.length ?? 0,
+              animal: gameState?.opponent?.collected?.animal?.length ?? 0,
+              ribbon: gameState?.opponent?.collected?.ribbon?.length ?? 0,
+              pi: gameState?.opponent?.collected?.pi?.length ?? 0,
+            },
+            opponentCollected: {
+              kwang: gameState?.player?.collected?.kwang?.length ?? 0,
+              animal: gameState?.player?.collected?.animal?.length ?? 0,
+              ribbon: gameState?.player?.collected?.ribbon?.length ?? 0,
+              pi: gameState?.player?.collected?.pi?.length ?? 0,
+            },
+            isMultiplayer: true,
+            roomId: this.roomId,
+            isHost: false,
+            winnerId: winnerId ?? 'unknown',
+            loserId: isHostWinner ? (this.multiplayerPlayers.guest?.id ?? 'unknown') : this.multiplayerPlayers.host.id,
+            winnerName: isHostWinner ? this.multiplayerPlayers.host.name : (this.multiplayerPlayers.guest?.name ?? '나'),
+            loserName: isHostWinner ? (this.multiplayerPlayers.guest?.name ?? '나') : this.multiplayerPlayers.host.name,
+            roundNumber: room.roundNumber ?? 1,
+            // 게스트 관점에서 ScoreBreakdown
+            // 게스트가 승자면 playerScoreBreakdown에 winnerScore, 패자면 opponentScoreBreakdown에 winnerScore
+            playerScoreBreakdown: localWinner === 'player'
+              ? { total: winnerScoreFromRoom } as ScoreBreakdown
+              : { total: playerScore } as ScoreBreakdown,
+            opponentScoreBreakdown: localWinner === 'opponent'
+              ? { total: winnerScoreFromRoom } as ScoreBreakdown
+              : { total: opponentScore } as ScoreBreakdown,
+          };
+
+          console.log('[Guest] Game ended, navigating to result scene:', guestResult);
+          this.changeScene('result', guestResult);
           return;
         }
         this.hud.showNotification('호스트가 게임을 종료했습니다. 로비로 돌아갑니다.');
@@ -860,10 +1126,15 @@ export class GameScene extends Scene {
   }
 
   private async startHostMultiplayerMatch(guestId: string, guestName: string): Promise<void> {
-    if (this.hasInitializedMultiplayerSystems) return;
+    console.log('[Host] startHostMultiplayerMatch called, hasInitialized:', this.hasInitializedMultiplayerSystems);
+    if (this.hasInitializedMultiplayerSystems) {
+      console.log('[Host] Already initialized, skipping');
+      return;
+    }
 
     // 레이스 컨디션 방지: 플래그를 먼저 설정하여 중복 호출 방지
     this.hasInitializedMultiplayerSystems = true;
+    console.log('[Host] Starting host multiplayer match with guest:', guestName);
 
     if (!this.multiplayerPlayers) {
       const currentUserId = getCurrentUserId() ?? 'host';
@@ -877,7 +1148,9 @@ export class GameScene extends Scene {
       name: guestName,
     };
 
+    console.log('[Host] Calling initializeLocalGameSystems');
     await this.initializeLocalGameSystems(false);
+    console.log('[Host] initializeLocalGameSystems completed, phase:', this.turnManager?.getPhase());
 
     // 호스트: 게스트의 액션을 수신하도록 리스너 설정
     this.setupHostOpponentActionListener();
@@ -975,6 +1248,11 @@ export class GameScene extends Scene {
 
     try {
       if (accept) {
+        // IMPORTANT: Initialize game systems and broadcast state BEFORE updating room status
+        // This ensures gameState exists in Firebase when guest enters GameScene
+        await this.startHostMultiplayerMatch(request.playerId, request.playerName);
+
+        // Now update room status to 'playing' - guest will enter GameScene and find gameState ready
         await update(roomRef, {
           guest: request.playerId,
           guestName: request.playerName,
@@ -982,7 +1260,6 @@ export class GameScene extends Scene {
           joinRequest: null,
           lastActivityAt: Date.now(),
         });
-        await this.startHostMultiplayerMatch(request.playerId, request.playerName);
       } else {
         await update(roomRef, {
           joinRequest: null,
@@ -1021,7 +1298,7 @@ export class GameScene extends Scene {
       const text = new Text({
         text: message,
         style: new TextStyle({
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+          fontFamily: FONTS.PRIMARY,
           fontSize: 22,
           fontWeight: 'bold',
           fill: COLORS.TEXT,
@@ -1081,7 +1358,7 @@ export class GameScene extends Scene {
     const title = new Text({
       text: '도전자가 입장을 요청했습니다',
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 24,
         fontWeight: 'bold',
         fill: COLORS.TEXT,
@@ -1094,7 +1371,7 @@ export class GameScene extends Scene {
     const message = new Text({
       text: `${request.playerName}님이 게임 참여를 희망합니다.\n게임을 시작할까요?`,
       style: new TextStyle({
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        fontFamily: FONTS.PRIMARY,
         fontSize: 18,
         fill: COLORS.TEXT,
         align: 'center',
@@ -1170,16 +1447,22 @@ export class GameScene extends Scene {
     return myTurn && phaseOK;
   }
 
-  private applyRemoteState(state: GameState): void {
-    if (!this.multiplayerPlayers) return;
+  private async applyRemoteState(state: GameState): Promise<void> {
+    if (!this.multiplayerPlayers) {
+      console.warn('[applyRemoteState] multiplayerPlayers is null, skipping');
+      return;
+    }
 
-    // Store the state for turn checking
-    this.lastReceivedGameState = state;
+    console.log('[applyRemoteState] Received state:', state?.phase, state?.currentTurn);
 
-    const currentUserId = getCurrentUserId();
-    const isLocalHost = currentUserId === this.multiplayerPlayers.host.id;
+    try {
+      // Store the state for turn checking
+      this.lastReceivedGameState = state;
 
-    console.log('[applyRemoteState] isLocalHost:', isLocalHost, 'state.currentTurn:', state.currentTurn);
+      const currentUserId = getCurrentUserId();
+      const isLocalHost = currentUserId === this.multiplayerPlayers.host.id;
+
+      console.log('[applyRemoteState] isLocalHost:', isLocalHost, 'state.currentTurn:', state.currentTurn);
 
     const localState = isLocalHost ? state.player : state.opponent;
     const remoteState = isLocalHost ? state.opponent : state.player;
@@ -1207,6 +1490,7 @@ export class GameScene extends Scene {
     const localCollected = normalizeCollected(localState?.collected);
     const remoteCollected = normalizeCollected(remoteState?.collected);
 
+    // 게스트: 이미 애니메이션이 실행되었으므로 상태만 동기화
     this.playerHand.setCardsFromData(localHand, { showFront: true });
     this.opponentHand.setCardsFromData(remoteHand, { showFront: false });
 
@@ -1245,9 +1529,60 @@ export class GameScene extends Scene {
     this.playerCollectedDisplay.setTurnActive(isPlayerTurn);
     this.opponentCollectedDisplay.setTurnActive(isOpponentTurn);
 
-    // 게스트가 자신의 턴일 때 알림 표시
-    if (!isLocalHost && localTurn === 'player' && state.phase !== 'waiting' && state.phase !== 'dealing') {
-      console.log('[Guest] It is my turn! Cards should be clickable');
+    // 플레이어 턴일 때 손패 확인 및 알림
+    if (isPlayerTurn) {
+      console.log(`[applyRemoteState] It is my turn! localHand count: ${localHand.length}, phase: ${state.phase}`);
+
+      // 내 턴인데 손패가 비어있는 경우 알림
+      if (localHand.length === 0) {
+        console.log('[applyRemoteState] My hand is empty on my turn - waiting for automatic deck draw');
+        // 호스트가 자동으로 처리하므로 알림만 표시
+        if (this.hud && state.phase !== 'resolving') {
+          this.hud.showNotification('손패가 비어있어 덱에서 자동으로 뽑습니다...');
+        }
+      }
+    }
+
+    // 2장 매칭 선택 UI 처리 (게스트)
+    // 먼저 모든 하이라이트 제거
+    this.field.clearAllHighlights();
+
+    if (state.selectionContext) {
+      // 게스트 화면에서 누가 선택해야 하는지 확인
+      // state.selectionContext.requiredFor는 호스트 관점 (player=호스트, opponent=게스트)
+      const needsLocalSelection = isLocalHost
+        ? state.selectionContext.requiredFor === 'player'
+        : state.selectionContext.requiredFor === 'opponent';
+
+      console.log('[applyRemoteState] selectionContext:', state.selectionContext, 'needsLocalSelection:', needsLocalSelection);
+
+      if (needsLocalSelection) {
+        // 내가 선택해야 함
+        const typeText = state.selectionContext.type === 'hand' ? '손패로' : '뒷패로';
+        this.hud.showNotification(`${typeText} 바닥패를 선택하세요`);
+
+        // 선택 가능한 바닥패 하이라이트
+        state.selectionContext.options.forEach(optionData => {
+          const fieldCard = this.field.getAllCards().find(c => c.cardData.id === optionData.id);
+          if (fieldCard) {
+            fieldCard.setMatchHighlight(true);
+          }
+        });
+      } else {
+        // 상대가 선택 중
+        this.hud.showNotification('상대가 바닥패를 선택 중...');
+
+        // 상대가 선택할 바닥패도 하이라이트 (게스트 화면에서 시각적으로 표시)
+        state.selectionContext.options.forEach(optionData => {
+          const fieldCard = this.field.getAllCards().find(c => c.cardData.id === optionData.id);
+          if (fieldCard) {
+            fieldCard.setMatchHighlight(true);
+          }
+        });
+      }
+    }
+    } catch (error) {
+      console.error('[applyRemoteState] Error applying state:', error);
     }
   }
 }
