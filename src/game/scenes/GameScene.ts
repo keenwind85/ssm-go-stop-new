@@ -1190,6 +1190,9 @@ export class GameScene extends Scene {
     this.playerCollectedDisplay.setPlayerName(this.multiplayerPlayers.host.name);
     this.opponentCollectedDisplay.setPlayerName(guestName);
 
+    // HUD에 플레이어 이름 설정 (턴 표시용)
+    this.hud.setPlayerNames(this.multiplayerPlayers.host.name, guestName);
+
     // 게임 시작 시 즉시 상태를 한 번 동기화하여 게스트에게 초기 상태 전달
     await this.broadcastGameState();
 
@@ -1516,6 +1519,9 @@ export class GameScene extends Scene {
     const remoteName = remoteState?.name ?? '상대';
     this.playerCollectedDisplay.setPlayerName(localName);
     this.opponentCollectedDisplay.setPlayerName(remoteName);
+
+    // HUD에 플레이어 이름 설정 (턴 표시용)
+    this.hud.setPlayerNames(localName, remoteName);
 
     console.log('[applyRemoteState] Setting names - local:', localName, 'remote:', remoteName);
 

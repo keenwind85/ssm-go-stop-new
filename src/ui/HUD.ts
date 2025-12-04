@@ -5,11 +5,10 @@ import { GAME_WIDTH, COLORS, LAYOUT, FONTS } from '@utils/constants';
 const TURN_TIMEOUT = 30; // 30 seconds per turn
 
 export class HUD extends Container {
-  // Turn indicators for each player
-  private playerTurnContainer!: Container;
-  private opponentTurnContainer!: Container;
-  private playerTimerText!: Text;
-  private opponentTimerText!: Text;
+  // Single unified turn indicator (positioned in opponent area at top)
+  private turnIndicatorContainer!: Container;
+  private turnIndicatorBg!: Graphics;
+  private turnIndicatorText!: Text;
 
   // Timeout notification
   private notificationContainer!: Container;
@@ -20,23 +19,15 @@ export class HUD extends Container {
   private isTimerRunning: boolean = false;
   private currentTurn: 'player' | 'opponent' = 'player';
 
+  // Player names for display
+  private playerName: string = '나';
+  private opponentName: string = '상대';
+
   constructor() {
     super();
 
-    // Create turn indicators for both areas
-    this.playerTurnContainer = this.createTurnIndicator(true);
-    this.opponentTurnContainer = this.createTurnIndicator(false);
-
-    // Extract timer text references
-    this.playerTimerText = this.playerTurnContainer.getChildByName('timerText') as Text;
-    this.opponentTimerText = this.opponentTurnContainer.getChildByName('timerText') as Text;
-
-    // Position containers
-    this.playerTurnContainer.position.set(LAYOUT.GAME_AREA_CENTER_X, LAYOUT.PLAYER_HAND_Y + 30);
-    this.opponentTurnContainer.position.set(LAYOUT.GAME_AREA_CENTER_X, LAYOUT.OPPONENT_HAND_Y - 50);
-
-    this.addChild(this.playerTurnContainer);
-    this.addChild(this.opponentTurnContainer);
+    // Create single unified turn indicator (positioned in opponent area at top)
+    this.createTurnIndicator();
 
     // Create notification overlay
     this.createNotification();
@@ -48,54 +39,41 @@ export class HUD extends Container {
     this.updateTurn('player');
   }
 
-  private createTurnIndicator(isPlayer: boolean): Container {
-    const container = new Container();
+  private createTurnIndicator(): void {
+    this.turnIndicatorContainer = new Container();
 
-    // Background pill
-    const bg = new Graphics();
-    bg.roundRect(-120, -25, 240, 50, 25);
-    const backgroundAlpha = isPlayer ? 0.65 : 0.9;
-    bg.fill({ color: isPlayer ? COLORS.PRIMARY : COLORS.WARNING, alpha: backgroundAlpha });
-    container.addChild(bg);
+    // Background pill - wider to accommodate text format "[OOO님 차례입니다. NN초 남았습니다]"
+    this.turnIndicatorBg = new Graphics();
+    this.turnIndicatorBg.roundRect(-180, -22, 360, 44, 22);
+    this.turnIndicatorBg.fill({ color: COLORS.PRIMARY, alpha: 0.85 });
+    this.turnIndicatorContainer.addChild(this.turnIndicatorBg);
 
-    // Turn text
-    const turnText = new Text({
-      text: isPlayer ? '내 차례' : '상대 차례',
+    // Turn indicator text - format: "[OOO님 차례입니다. NN초 남았습니다]"
+    this.turnIndicatorText = new Text({
+      text: '나님 차례입니다. 30초 남았습니다',
       style: new TextStyle({
         fontFamily: FONTS.PRIMARY,
-        fontSize: 20,
+        fontSize: 16,
         fontWeight: 'bold',
         fill: COLORS.TEXT,
       }),
     });
-    turnText.anchor.set(0.5);
-    turnText.position.set(-30, 0);
-    turnText.name = 'turnText';
-    container.addChild(turnText);
+    this.turnIndicatorText.anchor.set(0.5);
+    this.turnIndicatorContainer.addChild(this.turnIndicatorText);
 
-    // Timer background (circular)
-    const timerBg = new Graphics();
-    timerBg.circle(70, 0, 22);
-    timerBg.fill({ color: 0x000000, alpha: 0.3 });
-    timerBg.name = 'timerBg';
-    container.addChild(timerBg);
+    // Position in opponent area (top of screen where opponent's flipped cards are shown)
+    this.turnIndicatorContainer.position.set(LAYOUT.GAME_AREA_CENTER_X, LAYOUT.OPPONENT_HAND_Y - 50);
+    this.addChild(this.turnIndicatorContainer);
+  }
 
-    // Timer text
-    const timerText = new Text({
-      text: '30',
-      style: new TextStyle({
-        fontFamily: FONTS.PRIMARY,
-        fontSize: 18,
-        fontWeight: 'bold',
-        fill: COLORS.TEXT,
-      }),
-    });
-    timerText.anchor.set(0.5);
-    timerText.position.set(70, 0);
-    timerText.name = 'timerText';
-    container.addChild(timerText);
-
-    return container;
+  /**
+   * Set player names for turn indicator display
+   */
+  setPlayerNames(playerName: string, opponentName: string): void {
+    this.playerName = playerName || '나';
+    this.opponentName = opponentName || '상대';
+    // Update display with current names
+    this.updateTurnIndicatorDisplay();
   }
 
   private createNotification(): void {
@@ -154,22 +132,61 @@ export class HUD extends Container {
     const turnChanged = this.currentTurn !== turn;
     this.currentTurn = turn;
 
-    // Show/hide appropriate turn indicators with animation
-    if (turn === 'player') {
-      this.playerTurnContainer.visible = true;
-      this.opponentTurnContainer.visible = false;
-      this.playerTurnContainer.alpha = 0;
-      gsap.to(this.playerTurnContainer, { alpha: 1, duration: 0.3 });
-    } else {
-      this.playerTurnContainer.visible = false;
-      this.opponentTurnContainer.visible = true;
-      this.opponentTurnContainer.alpha = 0;
-      gsap.to(this.opponentTurnContainer, { alpha: 1, duration: 0.3 });
+    // Update background color based on whose turn it is
+    // COLORS.PRIMARY for player's turn (my turn), COLORS.WARNING for opponent's turn
+    this.updateTurnIndicatorBackground();
+
+    // Animate turn indicator on turn change
+    if (turnChanged) {
+      this.turnIndicatorContainer.alpha = 0;
+      gsap.to(this.turnIndicatorContainer, { alpha: 1, duration: 0.3 });
     }
 
     // Reset timer only when turn actually changes or forced
     if (turnChanged || forceResetTimer) {
       this.resetTurnTimer();
+    }
+
+    // Update display text
+    this.updateTurnIndicatorDisplay();
+  }
+
+  /**
+   * Update turn indicator background color based on whose turn it is
+   */
+  private updateTurnIndicatorBackground(): void {
+    // Clear and redraw background with appropriate color
+    this.turnIndicatorBg.clear();
+    this.turnIndicatorBg.roundRect(-180, -22, 360, 44, 22);
+    // Use COLORS.PRIMARY for player's turn (matches player's ID color in collected cards)
+    // Use COLORS.WARNING for opponent's turn (matches opponent's ID color in collected cards)
+    const bgColor = this.currentTurn === 'player' ? COLORS.PRIMARY : COLORS.WARNING;
+    this.turnIndicatorBg.fill({ color: bgColor, alpha: 0.85 });
+  }
+
+  /**
+   * Update turn indicator text display with player name and remaining time
+   */
+  private updateTurnIndicatorDisplay(): void {
+    const seconds = Math.ceil(this.turnTimeRemaining);
+    const name = this.currentTurn === 'player' ? this.playerName : this.opponentName;
+    this.turnIndicatorText.text = `${name}님 차례입니다. ${seconds}초 남았습니다`;
+
+    // Change text color based on time remaining for urgency
+    if (seconds <= 5) {
+      this.turnIndicatorText.style.fill = COLORS.ERROR;
+      // Pulse animation when low time
+      gsap.to(this.turnIndicatorText.scale, {
+        x: 1.1,
+        y: 1.1,
+        duration: 0.2,
+        yoyo: true,
+        repeat: 1,
+      });
+    } else if (seconds <= 10) {
+      this.turnIndicatorText.style.fill = COLORS.WARNING;
+    } else {
+      this.turnIndicatorText.style.fill = COLORS.TEXT;
     }
   }
 
@@ -183,7 +200,7 @@ export class HUD extends Container {
   resetTurnTimer(): void {
     this.turnTimeRemaining = TURN_TIMEOUT;
     this.isTimerRunning = true;
-    this.updateTimerDisplay();
+    this.updateTurnIndicatorDisplay();
   }
 
   stopTimer(): void {
@@ -192,30 +209,6 @@ export class HUD extends Container {
 
   startTimer(): void {
     this.isTimerRunning = true;
-  }
-
-  private updateTimerDisplay(): void {
-    const seconds = Math.ceil(this.turnTimeRemaining);
-    const timerText = this.currentTurn === 'player' ? this.playerTimerText : this.opponentTimerText;
-
-    timerText.text = seconds.toString();
-
-    // Change color based on time remaining
-    if (seconds <= 5) {
-      timerText.style.fill = COLORS.ERROR;
-      // Pulse animation when low time
-      gsap.to(timerText.scale, {
-        x: 1.2,
-        y: 1.2,
-        duration: 0.2,
-        yoyo: true,
-        repeat: 1,
-      });
-    } else if (seconds <= 10) {
-      timerText.style.fill = COLORS.WARNING;
-    } else {
-      timerText.style.fill = COLORS.TEXT;
-    }
   }
 
   updateTimer(deltaTime: number): void {
@@ -229,11 +222,11 @@ export class HUD extends Container {
       this.emit('turnTimeout', this.currentTurn);
     }
 
-    this.updateTimerDisplay();
+    this.updateTurnIndicatorDisplay();
   }
 
   showTimeoutNotification(): void {
-    this.notificationText.text = '시간이 경과하여 상대방 차례로 변경되었습니다';
+    this.notificationText.text = '제한 시간이 경과하여 턴이 넘어갑니다';
     this.notificationContainer.visible = true;
     this.notificationContainer.alpha = 0;
 
