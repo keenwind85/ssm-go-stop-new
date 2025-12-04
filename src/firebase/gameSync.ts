@@ -103,6 +103,12 @@ export class GameSync {
     });
   }
 
+  async sendTimeoutSkip(): Promise<void> {
+    await this.sendAction({
+      type: 'TIMEOUT_SKIP',
+    });
+  }
+
   onGameStateChange(callback: (state: GameState) => void): void {
     console.log('[GameSync] Setting up onGameStateChange listener for room:', this.roomId);
     const unsubscribe = onValue(this.gameStateRef, (snapshot: DataSnapshot) => {
