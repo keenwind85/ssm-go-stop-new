@@ -150,7 +150,8 @@ export class HUD extends Container {
     // Scores are now displayed in CollectedCardsDisplay
   }
 
-  updateTurn(turn: 'player' | 'opponent'): void {
+  updateTurn(turn: 'player' | 'opponent', forceResetTimer: boolean = false): void {
+    const turnChanged = this.currentTurn !== turn;
     this.currentTurn = turn;
 
     // Show/hide appropriate turn indicators with animation
@@ -166,8 +167,10 @@ export class HUD extends Container {
       gsap.to(this.opponentTurnContainer, { alpha: 1, duration: 0.3 });
     }
 
-    // Reset timer
-    this.resetTurnTimer();
+    // Reset timer only when turn actually changes or forced
+    if (turnChanged || forceResetTimer) {
+      this.resetTurnTimer();
+    }
   }
 
   updateCollectedCounts(
