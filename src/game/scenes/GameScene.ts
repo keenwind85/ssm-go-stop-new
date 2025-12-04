@@ -62,6 +62,7 @@ export class GameScene extends Scene {
   private activeJoinRequestId: string | null = null;
   private hasInitializedMultiplayerSystems = false;
   private lastReceivedGameState: GameState | null = null;
+  private lastKnownTurn: 'player' | 'opponent' | null = null;  // 게스트의 이전 턴 상태 추적
   // 애니메이션 진행 중 상태 동기화 방지용
   private isAnimatingCard = false;
   private pendingStateUpdate: GameState | null = null;
@@ -424,11 +425,37 @@ export class GameScene extends Scene {
     });
 
     // Turn timeout handling
-    this.hud.on('turnTimeout', (turn: 'player' | 'opponent') => {
-      if (turn === 'player' && turnManager.isPlayerTurn()) {
-        this.hud.showTimeoutNotification();
-        turnManager.forceSkipTurn();
+    this.hud.on('turnTimeout', async (turn: 'player' | 'opponent') => {
+      console.log('[GameScene] turnTimeout event received, turn:', turn, 'gameMode:', this.gameMode);
+
+      if (turn === 'player') {
+        // 내 턴에서 타임아웃
+        if (this.gameMode === 'ai') {
+          // AI 모드: 로컬에서 직접 처리
+          if (turnManager.isPlayerTurn()) {
+            this.hud.showTimeoutNotification();
+            turnManager.forceSkipTurn();
+          }
+        } else {
+          // 멀티플레이 모드
+          if (this.multiplayerRole === 'host') {
+            // 호스트의 턴이 타임아웃: 직접 forceSkipTurn 호출
+            if (turnManager.isPlayerTurn()) {
+              console.log('[GameScene] Host timeout - forcing skip turn');
+              this.hud.showTimeoutNotification();
+              turnManager.forceSkipTurn();
+            }
+          } else {
+            // 게스트의 턴이 타임아웃: Firebase로 호스트에게 알림
+            console.log('[GameScene] Guest timeout - sending TIMEOUT_SKIP action to host');
+            this.hud.showTimeoutNotification();
+            if (this.gameSync) {
+              await this.gameSync.sendTimeoutSkip();
+            }
+          }
+        }
       }
+      // 상대 턴 타임아웃은 상대가 자신의 타임아웃을 처리하므로 여기서 처리하지 않음
     });
 
     // Stop timer during card resolution
@@ -436,8 +463,12 @@ export class GameScene extends Scene {
       this.hud.stopTimer();
     });
 
-    // Resume timer when turn starts
-    turnManager.on('turnStart', () => {
+    // Resume timer when turn starts (호스트에서 turnStart 이벤트 발생 시)
+    turnManager.on('turnStart', (player: 'player' | 'opponent') => {
+      // 로컬 플레이어 관점에서 턴 표시 업데이트 및 타이머 리셋
+      // 호스트: player=호스트, opponent=게스트
+      // 게스트는 applyRemoteState에서 처리하므로 호스트에서만 이 이벤트 수신
+      this.hud.updateTurn(player, true);  // forceResetTimer=true로 타이머 리셋
       this.hud.startTimer();
     });
 
@@ -1237,6 +1268,17 @@ export class GameScene extends Scene {
           this.turnManager.declareStop();
           break;
         }
+        case 'TIMEOUT_SKIP': {
+          // 게스트가 자신의 턴에서 타임아웃됨 - 호스트가 처리
+          console.log('[Host] Processing TIMEOUT_SKIP from guest');
+          if (currentTurn === 'opponent') {
+            this.hud?.showNotification('상대방 시간 초과! 턴이 넘어갑니다.');
+            this.turnManager.forceSkipOpponentTurn();
+          } else {
+            console.warn('[Host] TIMEOUT_SKIP received but current turn is player, ignoring');
+          }
+          break;
+        }
       }
     });
   }
@@ -1519,8 +1561,28 @@ export class GameScene extends Scene {
     this.hud.updateScores({ player: localState?.score ?? 0, opponent: remoteState?.score ?? 0 });
 
     const localTurn = isLocalHost ? state.currentTurn : state.currentTurn === 'player' ? 'opponent' : 'player';
-    console.log('[applyRemoteState] localTurn computed:', localTurn, '(state.currentTurn:', state.currentTurn, ')');
-    this.hud.updateTurn(localTurn);
+    console.log('[applyRemoteState] localTurn computed:', localTurn, '(state.currentTurn:', state.currentTurn, ', phase:', state.phase, ')');
+
+    // 턴이 변경되었는지 확인 (게스트에서 턴 변경 시 타이머 리셋)
+    const turnChanged = this.lastKnownTurn !== null && this.lastKnownTurn !== state.currentTurn;
+    this.lastKnownTurn = state.currentTurn;
+
+    // 턴이 변경되었으면 타이머 강제 리셋
+    this.hud.updateTurn(localTurn, turnChanged);
+
+    // 타이머 상태 동기화: phase에 따라 타이머 시작/중지
+    // 플레이어/상대 턴, 선택 대기 상태에서만 타이머 실행
+    // selecting/deckSelecting은 2장 매칭 선택 대기 상태 - 타임아웃 적용 필요
+    const shouldRunTimer =
+      state.phase === 'playerTurn' ||
+      state.phase === 'opponentTurn' ||
+      state.phase === 'selecting' ||
+      state.phase === 'deckSelecting';
+    if (shouldRunTimer) {
+      this.hud.startTimer();
+    } else {
+      this.hud.stopTimer();
+    }
 
     // Update turn indicators with animation
     const isPlayerTurn = localTurn === 'player' && state.phase !== 'waiting' && state.phase !== 'dealing';
